@@ -16,7 +16,7 @@ public extension ToastError {
     /// The icon to put on the toast itself
     var icon: Image? {
         if let systemImage {
-            Image(systemName: systemImage)
+            Image(systemName: systemImage).symbolRenderingMode(.multicolor)
         }
         else {
             nil

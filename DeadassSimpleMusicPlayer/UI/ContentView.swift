@@ -26,11 +26,27 @@ struct ContentView: View {
     @State
     private var session = PlayerSession()
     
+    @State
+    private var controlsConfiguration = PlayerControlsConfiguration()
+                                                                           
+    
+    
     var body: some View {
         @Bindable var session = session
         
         NavigationStack {
             MediaPlayerView(currentPlaylist: $session.queue, session: session)
+            
+                .playerControls(configuration: controlsConfiguration) { action in
+                    switch action {
+                    case .play:
+                        
+                        
+                    case .pause:
+                        
+                    default: fatalError("TODO")
+                    }
+                }
             
                 .toolbar {
                     ToolbarItemGroup {

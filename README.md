@@ -15,7 +15,7 @@ No bullshit, just a good & simple app that plays media files.
 
 ## LLM Usage
 
-[I, Ky,](https://KyLeggiero.me) reviewed all the code in this repo, and wrote the vast majority of it.
+[I, Ky,](https://KyLeggiero.me) reviewed all the code in this repo, and wrote the vast majority of it. Nothing gets into production code without my careful review and explicit approval, no matter who or what wrote it. See [the PRs](https://github.com/BlueHuskyStudios/DeadassSimpleMediaPlayer/pulls) for proof of that.
 
 Some of it was written using LLMs, either directly writing it, or assisting contributors like myself.
 
