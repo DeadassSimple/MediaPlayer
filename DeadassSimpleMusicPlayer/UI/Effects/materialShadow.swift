@@ -28,11 +28,11 @@ public enum MaterialShadowElevation: UInt8 {
 
 
 public extension View {
-    func materialShadow(_ elevation: MaterialShadowElevation, lightFrom lightingDirection: Angle) -> some View {
+    func materialShadow(_ elevation: MaterialShadowElevation, lightFrom lightingDirection: Angle = .degrees(90)) -> some View {
         let yOffsetMod: (CGFloat) -> CGFloat
         
         // First-pass simple version: If the lighting direction is upside-down, just invert the default y offset
-        if (90...270).contains(lightingDirection.degrees.wrapped(within: 0..<360)) {
+        if (180...360).contains(lightingDirection.degrees.wrapped(within: 0..<360)) {
             yOffsetMod = { -$0 }
         }
         else {
