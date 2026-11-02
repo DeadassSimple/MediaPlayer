@@ -14,6 +14,7 @@ import Introspection
 
 private let inset: CGFloat = 4
 private let minCornerRadius: CGFloat = 24
+private let ignoredSafeAreaEdges: Edge.Set = .bottom
 
 
 
@@ -49,15 +50,11 @@ private struct PlayerControls: View {
             .padding(12)
             
             Spacer(minLength: 0)//.fixedSize()
-            Button(configuration.isPlaying ? "Pause" : "Play", systemImage: configuration.isPlaying ? "pause" : "play") {
-                performUserAction(.play)
-            }
-            .disabled(disabled)
-            .controlSize(.extraLarge).buttonBorderShape(.capsule).buttonStyle(.borderedProminent).labelsHidden()
+            transportButtons
             Spacer(minLength: 0)//.fixedSize()
         }
-        .ignoresSafeArea(.container)
-        .frame(height: 180)
+        .ignoresSafeArea(.container, edges: ignoredSafeAreaEdges)
+//        .frame(height: 180)
 //        .border(.red)
         .background {
             ConcentricRectangle(corners: .concentric(minimum: .fixed(minCornerRadius)))
@@ -65,6 +62,7 @@ private struct PlayerControls: View {
                 .fill(.accent.opacity(0.1))
             //        .fill(.accent.opacity(0.03))
             //        .elevation(.z24)
+                .materialShadow(.z24)
         }
         .padding(inset)
         
@@ -78,7 +76,7 @@ private struct PlayerControls: View {
 //        action: { newValue in
 //            screenCornerRadii = newValue
 //        }
-        .ignoresSafeArea(.container)
+        .ignoresSafeArea(.container, edges: ignoredSafeAreaEdges)
     }
     
     
@@ -99,14 +97,43 @@ private struct PlayerControls: View {
 
 
 
-public struct PlayerControlsConfiguration {
+private extension PlayerControls {
+    var transportButtons: some View {
+        HStack {
+            Spacer()
+            
+            playPauseButton
+            
+            Spacer()
+        }
+        .disabled(disabled)
+    }
+    
+    
+    var playPauseButton: some View {
+        Button(action: {
+            performUserAction(configuration.isPlaying ? .pause : .play)
+        }) {
+            Image(configuration.isPlaying ? .TransportControls.pause : .TransportControls.play)
+                .resizable()
+                .frame(width: 78, height: 78)
+        }
+    }
+
+}
+
+
+
+// MARK: - Supporting types
+
+public struct PlayerControlsConfiguration: Sendable {
     public var isPlaying: Bool = false
     public var backForwardKind: BackForwardKind = .skipTrack
     
     
     
     /// What kind of back/forward buttons should be in the player controls?
-    public enum BackForwardKind {
+    public enum BackForwardKind: Sendable {
         
         /// Skip back/forward by a certain duration
         case skipTime(forwardIncrement: SkipIncrement, backwardIncrement: SkipIncrement)
@@ -147,8 +174,8 @@ public enum PlayerAction: Sendable {
     
     public struct TransportTransaction: Sendable {
         public let transactionId: UUID
-        public let currentTime: Duration
-        public let duration: Duration
+        public let startPosition: Duration
+        public let currentPosition: Duration
     }
 }
 
@@ -164,14 +191,15 @@ private struct PlayerControlsViewModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay {
             VStack {
-                Spacer()
+                Spacer(minLength: 144).allowsHitTesting(false)
                     .layoutPriority(2)
-                
+
                 PlayerControls(configuration: configuration, onUserAction: onUserAction)
-                    .layoutPriority(1)
+                    .frame(minHeight: 292)
+                    .layoutPriority(0)
             }
 //            .border(.blue)
-            .ignoresSafeArea()
+            .ignoresSafeArea(edges: ignoredSafeAreaEdges)
         }
     }
 }

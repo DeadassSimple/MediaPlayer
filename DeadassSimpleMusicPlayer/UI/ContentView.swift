@@ -38,9 +38,12 @@ struct ContentView: View {
                 .playerControls(configuration: controlsConfiguration) { action in
                     switch action {
                     case .play:
-                        
+                        print("TODO: Play the player")
+                        controlsConfiguration.isPlaying = true
                         
                     case .pause:
+                        print("TODO: Pause the player")
+                        controlsConfiguration.isPlaying = false
                         
                     default: fatalError("TODO")
                     }
