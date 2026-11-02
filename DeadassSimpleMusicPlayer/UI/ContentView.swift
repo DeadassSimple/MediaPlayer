@@ -26,9 +26,25 @@ struct ContentView: View {
     @State
     private var session = PlayerSession()
     
+    @State
+    private var controlsConfiguration = PlayerControlsConfiguration()
+                                                                           
+    
+    
     var body: some View {
         NavigationStack {
             CustomMediaPlayer(session: session)
+            
+                .playerControls(configuration: controlsConfiguration) { action in
+                    switch action {
+                    case .play:
+                        
+                        
+                    case .pause:
+                        
+                    default: fatalError("TODO")
+                    }
+                }
             
                 .toolbar {
                     ToolbarItemGroup {
