@@ -97,6 +97,7 @@
 		092A407E2FF5C90A00B05BB3 /* Library */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Library; sourceTree = "<group>"; };
 		092A40852FF5C91F00B05BB3 /* Persistence */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Persistence; sourceTree = "<group>"; };
 		092A408D2FF5D73100B05BB3 /* ConcurrencyTools */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = ConcurrencyTools; sourceTree = "<group>"; };
+		092B9776309D62BF00FE6FC1 /* LLM transparency */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "LLM transparency"; sourceTree = "<group>"; };
 		097A4C263006FC7D00E31CE0 /* _demo data */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "_demo data"; sourceTree = "<group>"; };
 		0988E11C2FEA0DF700A4E9BA /* CollectionTools */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = CollectionTools; sourceTree = "<group>"; };
 		09C1FE8F3008566900E328EF /* AVKit */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = AVKit; sourceTree = "<group>"; };
@@ -181,6 +182,7 @@
 				0947B83F3002365100A5F26F /* LICENSE.txt */,
 				0947B83D3002363600A5F26F /* README.md */,
 				09BE24F93043EE8F00454003 /* CONTRIBUTING.md */,
+				092B9776309D62BF00FE6FC1 /* LLM transparency */,
 				09E57B203002336700B235A6 /* AppIcon.icon */,
 				B9B6F0DA2C1511390093BAED /* DeadassSimpleMusicPlayer */,
 				B9B6F0D92C1511390093BAED /* Products */,

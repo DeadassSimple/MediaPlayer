@@ -73,7 +73,7 @@ public final class PlaybackEngine {
     /// Whether the current item carries its own video. Assumed `true` until inspection proves otherwise, so cover art can never flash over the opening frames of an actual video.
     public private(set) var hasVideoTrack = true
     
-    /// Bumped every time the current item's metadata resolves another field. Read by ``metadata(_:)`` so that any `body` calling it re-renders when the answer changes — `AsyncMetadata`'s own lookups aren't tracked by Observation.
+    /// Bumped every time the current item's metadata resolves another field
     private var metadataRevision: UInt = 0
     
     
@@ -300,16 +300,8 @@ public extension PlaybackEngine {
     /// - Parameter key: Identifies the metadata you want
     /// - Returns: The search's state, or `nil` if nothing is loaded
     func metadata<Value>(_ key: AsyncMetadataKey<Value>) -> MetadataSearchResult<Value>? {
-        _ = metadataRevision // Registers the Observation dependency; see the property's doc
-        
-        guard let currentItem else { return nil }
-        switch currentItem.metadata?.get(key) {
-        case .none:                return .none
-        case .notStarted:          return .notStarted
-        case .loading:             return .loading
-        case .success(let value):  return .success(value)
-        case .failure(let cause):  return .failure(cause)
-        }
+        access(keyPath: \.metadataRevision) // Registers the Observation dependency; see the property's doc
+        return currentItem?.metadata?.get(key)
     }
 }
 
