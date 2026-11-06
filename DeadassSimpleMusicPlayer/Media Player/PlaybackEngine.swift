@@ -20,57 +20,47 @@ import SimpleLogging
 
 
 
-/// What a ``PlaybackEngine`` reports to whoever composed it.
+/// Plays 1 media item, and tells the system that this item is the media that plays.
 ///
-/// The engine knows how to play one item and nothing about what should happen next; these are the moments where something with more context (a queue, a history) gets to decide. All calls arrive on the main actor.
-@MainActor
-public protocol PlaybackEngineDelegate: AnyObject {
-    
-    /// The loaded item played all the way to its end. The engine now rests at the end of that item; nothing plays until told to.
-    func playbackEngine(_ engine: PlaybackEngine, didFinishPlaying item: MediaItem)
-    
-    /// Where playback currently is in the loaded item. Called about twice a second while an item is loaded, whether or not it's playing.
-    func playbackEngine(_ engine: PlaybackEngine, playbackPositionDidChangeTo seconds: TimeInterval)
-    
-    /// Playback went from moving to stopped — by the user, a remote command, an interruption, or reaching the end. A moment the user implicitly expects their place to be remembered.
-    func playbackEngineDidPause(_ engine: PlaybackEngine)
-}
-
-
-
-/// The live machinery for playing exactly one media item well.
+/// Use this type to show or control playback directly. For example, a transport bar can read `isPlaying` and call `play()`. To show the video or the cover art, use `CustomMediaPlayer`, which shows this engine.
 ///
-/// Owns one `AVPlayer`, and everything that item needs to behave like a real citizen of the platform without anyone else lifting a finger: remote transport commands (Control Center, Lock Screen, headphone buttons), Now Playing info, background audio, restored playback positions, cover art where video isn't. This is what makes ``MediaPlayerView`` a batteries-included drop-in — and because it lives here rather than in a view, the batteries keep working no matter which view (if any) is on screen.
+/// The engine does the work that the system wants from a media app:
+/// - It obeys the remote commands (Control Center, the Lock Screen, headphone buttons).
+/// - It publishes the Now Playing info.
+/// - It continues to play in the background.
+/// - It shows cover art for audio.
 ///
-/// It knows nothing about playlists, queues, or repeat modes. When an item finishes, the engine simply reports it through its ``delegate`` and rests; whatever holds the queue decides what plays next and calls ``load(_:resumingAt:autoplay:)`` again.
+/// This work continues when no view shows the engine.
 ///
-/// **State flows one way.** Every observable fact here (``isPlaying``, ``currentTime``, ``duration``, …) is written only by the engine's own observers of the `AVPlayer`. To *change* playback, call a method — ``play()``, ``pause()``, ``seek(to:)`` — which drives the player, and the fact updates when the player actually changes. Nothing outside this type writes `isPlaying`, so it can never disagree with what the player is doing.
+/// The engine does not know about queues or about `RepeatMode`. When an item plays to its end, the engine sends `Event.finished(item:)` and stays at the end of the item. The owner of the queue selects the next item, and calls `load(_:resumingAt:autoplay:)`.
 ///
-/// Expected to be a singleton per process in practice: the remote command center and Now Playing info center are process-wide, so two engines would fight over them.
+/// Read the state from the properties, and change the state with the methods. The properties change only when the `AVPlayer` changes. For example, `play()` does not set `isPlaying`: `isPlaying` becomes `true` when the player starts. Thus the properties always agree with the player.
+///
+/// Load items into only 1 engine at a time. The process has only 1 set of remote commands and only 1 Now Playing info. Thus 2 engines that load items replace the handlers and the info of each other.
 @MainActor
 @Observable
 public final class PlaybackEngine {
     
     // MARK: Facts
     
-    /// What's loaded right now, or `nil` when nothing is
+    /// The item that is loaded, or `nil` when no item is loaded
     public private(set) var currentItem: MediaItem? = nil
     
-    /// Whether playback is moving. Mirrors the player's rate; written nowhere but the rate observer.
+    /// `true` while the player plays. This value changes when the player starts or stops, not when a method of this engine starts.
     public private(set) var isPlaying = false
     
-    /// Where playback is in the current item, in seconds. Updated about twice a second while an item is loaded, and immediately after a seek.
+    /// The playhead position in the loaded item, in seconds from the start of the item. This value changes at intervals during playback, and after each seek.
     public private(set) var currentTime: TimeInterval = 0
     
-    /// The current item's duration once it's known, or `nil` while it's still being determined (or when nothing is loaded).
-    ///
-    /// Loaded explicitly rather than read from `AVPlayerItem.duration`, which reports `.indefinite` until the item becomes ready — publishing that to remote controls is what produces a track with no progress bar.
+    /// The duration of the loaded item, in seconds. `nil` while the duration is not known, and when no item is loaded.
     public private(set) var duration: TimeInterval? = nil
     
-    /// Cover art to show where video would be. Only ever non-`nil` for media which has no video of its own; video always wins the screen.
+    /// The cover art to show in the video area. `nil` when the loaded item has video, and when no item is loaded.
     public private(set) var artwork: NativeImage? = nil
     
-    /// Whether the current item carries its own video. Assumed `true` until inspection proves otherwise, so cover art can never flash over the opening frames of an actual video.
+    /// `true` when the loaded item has video.
+    ///
+    /// This value stays `true` until the engine finds that the item has no video. Thus cover art cannot show on top of the first frames of a video.
     public private(set) var hasVideoTrack = true
     
     /// Bumped every time the current item's metadata resolves another field
@@ -79,50 +69,134 @@ public final class PlaybackEngine {
     
     // MARK: Machinery
     
-    /// The player itself. Exposed so a view can put its video on screen; drive playback through this engine's methods rather than the player directly, so the engine's facts stay true.
+    /// The player of this engine. Use it to show the video, for example in `Player`.
+    ///
+    /// To change playback, call the methods of this engine, not the methods of the player. The methods of the engine do more than the methods of the player. For example, `play()` starts an item again after the item played to its end.
     public let player = AVPlayer()
     
-    /// Who to tell when something happens that this engine can't decide about on its own
-    @ObservationIgnored
-    public weak var delegate: (any PlaybackEngineDelegate)? = nil
-    
-    /// Subscriptions that live as long as this engine does
+    /// The subscriptions that stay for the life of the engine
     @ObservationIgnored
     private var sinks: Set<AnyCancellable> = []
     
-    /// Republishes the current item's metadata updates into ``metadataRevision`` and Now Playing info. Replaced whenever the item is.
+    /// Sends each metadata change of the loaded item to `metadataRevision`, to the Now Playing info, and to `artwork`. The engine replaces this subscription with each item.
     @ObservationIgnored
     private var metadataSink: AnyCancellable? = nil
     
-    /// Watches the current `AVPlayerItem` for playing to its end, so the delegate can advance a queue. Replaced whenever the item is; dropping the old sink is what unsubscribes it.
+    /// Sends `Event.finished(item:)` when the loaded `AVPlayerItem` plays to its end. The engine replaces this subscription with each item, and the release of the previous subscription stops it.
     @ObservationIgnored
     private var itemEndSink: AnyCancellable? = nil
     
-    /// Watches the current `AVPlayerItem` for its time changing discontinuously (a seek), so remote controls can be told where the playhead actually landed. Replaced whenever the item is; dropping the old sink is what unsubscribes it.
+    /// Writes the new playhead position to the Now Playing info after a seek in the loaded `AVPlayerItem`. The engine replaces this subscription with each item, and the release of the previous subscription stops it.
     ///
-    /// The system extrapolates elapsed time from the last-published value and the playback rate, and a seek changes elapsed time *without* changing the rate — so a seek is invisible to that extrapolation until something republishes.
+    /// The system calculates the playback position from the last position that the app wrote and from the rate. A seek changes the position but not the rate. Thus the system does not see a seek until the app writes the position again.
     @ObservationIgnored
     private var itemTimeJumpSink: AnyCancellable? = nil
     
-    /// Waits for the current `AVPlayerItem` to become ready, so a restored playback position can be applied at a moment the item will actually honor it (seeks issued earlier are ignored or rejected outright).
+    /// Waits until the status of the loaded `AVPlayerItem` is `.readyToPlay`, then moves the playhead to the position from the previous session. An item ignores or rejects a seek before that status.
     ///
-    /// Direct KVO rather than Combine's KVO publisher: this is the canonical, battle-tested readiness pattern, chosen after the publisher approach failed to restore positions in practice. Must be retained for its lifetime; invalidated & replaced whenever the item is.
+    /// This uses `observe(_:options:changeHandler:)`, not the KVO publisher of Combine. With the publisher, the playhead did not go to the positions from the previous session in tests. This KVO pattern is the usual pattern for item status. The observation must stay in memory while it is necessary. The engine invalidates and replaces it with each item.
     @ObservationIgnored
     private var itemReadinessObservation: NSKeyValueObservation? = nil
     
-    /// Opaque token for the player's periodic time observer, held for the engine's lifetime
+    /// The token of the periodic time observer. `deinit` gives it back to the player.
     @ObservationIgnored
     private var periodicTimeObserverToken: Any? = nil
     
+    /// `true` after this engine connected the remote commands to its player.
+    ///
+    /// The engine connects them when it first loads an item, not in `init`. Thus an engine that does not load an item does not replace the handlers of the engine that plays.
+    @ObservationIgnored
+    private var hasInstalledRemoteTransportControls = false
     
-    /// Creates an engine with nothing loaded, and installs everything process-wide that playback needs: remote command handlers, the periodic time observer, background-playback policy, and the interruption observer.
+    /// The continuations of the open streams from `events()`. Each stream removes its continuation when the stream ends.
+    @ObservationIgnored
+    private var eventContinuations: [UUID: AsyncStream<Event>.Continuation] = [:]
+    
+    
+    /// Makes an engine with no item loaded.
+    ///
+    /// The engine connects to the remote commands when it first loads an item. Thus you can make an engine that you do not use, and that engine does not change the remote commands.
     public init() {
         installRateObserver()
         installPeriodicTimeObserver()
         installInterruptionObserver()
-        installRemoteTransportControls()
         
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
+    }
+    
+    
+    /// Gives the periodic time observer back to the player, and ends the streams from `events()`.
+    ///
+    /// The player must get a `removeTimeObserver(_:)` call for each periodic time observer. Without that call, the result is undefined.
+    isolated deinit {
+        if let periodicTimeObserverToken {
+            player.removeTimeObserver(periodicTimeObserverToken)
+        }
+        
+        eventContinuations.values.forEach { $0.finish() }
+    }
+}
+
+
+
+// MARK: - Events
+
+public extension PlaybackEngine {
+    
+    /// An occurrence during playback that the engine cannot make a decision about.
+    ///
+    /// Read these events from `events()`. An event can come after a different item loaded. Thus each event about an item names that item. Compare that item with your current item before you use the event.
+    enum Event: Sendable {
+        
+        /// The item played to its end. The engine stays at the end of the item, and does not play again until something tells it to.
+        case finished(item: MediaItem)
+        
+        /// The playhead of the item is at a new position, in seconds from the start of the item.
+        ///
+        /// The engine sends this event at intervals during playback, after each seek, and when playback starts or stops. While playback is paused, the engine does not send it at intervals.
+        case positionChanged(item: MediaItem, seconds: TimeInterval)
+        
+        /// Playback stopped. The cause can be the user, a remote command, an interruption, or the end of the item.
+        case paused
+    }
+    
+    
+    /// Returns a new stream of the events that occur after this call.
+    ///
+    /// Each call returns a different stream, and each stream gets all of the events. Thus more than 1 listener can read the events at the same time. To stop a stream, cancel the task that reads it. The stream ends when the engine is released.
+    ///
+    /// ```swift
+    /// Task {
+    ///     for await event in engine.events() {
+    ///         // Respond to `event` here
+    ///     }
+    /// }
+    /// ```
+    func events() -> AsyncStream<Event> {
+        let (stream, continuation) = AsyncStream.makeStream(of: Event.self)
+        let subscriberId = UUID()
+        
+        eventContinuations[subscriberId] = continuation
+        
+        continuation.onTermination = { [weak self] _ in
+            guard let self else { return }
+            
+            Task { @MainActor in
+                self.eventContinuations[subscriberId] = nil
+            }
+        }
+        
+        return stream
+    }
+}
+
+
+
+private extension PlaybackEngine {
+    
+    /// Gives `event` to each open stream from `events()`
+    func send(_ event: Event) {
+        eventContinuations.values.forEach { $0.yield(event) }
     }
 }
 
@@ -132,14 +206,14 @@ public final class PlaybackEngine {
 
 public extension PlaybackEngine {
     
-    /// Loads an item into the player, replacing whatever was there.
+    /// Loads an item, and replaces the item that was loaded before.
     ///
-    /// Everything the previous item established is cleared first — duration, art, video-track knowledge, and the per-item observers — so nothing from the last track can bleed into this one's Now Playing info.
+    /// The engine first removes all values that came from the previous item. Thus no value from the previous item can show in the Now Playing info of this item.
     ///
     /// - Parameters:
-    ///   - item:      What to load, or `nil` to unload the player entirely
-    ///   - seconds:   Where to start from, in seconds. Applied only once the item is ready to honor it; `nil` starts from the beginning.
-    ///   - autoplay:  Whether to start playing as soon as the item is loaded
+    ///   - item:     The item to load, or `nil` to unload the player
+    ///   - seconds:  The position to start from, in seconds. The engine moves the playhead to this position when the status of the item is `.readyToPlay`. `nil` starts at the start of the item.
+    ///   - autoplay: `true` starts playback immediately. `false` loads the item paused.
     func load(_ item: MediaItem?, resumingAt seconds: TimeInterval? = nil, autoplay: Bool) {
         currentItem = item
         duration = nil // The previous track's duration must not survive into this one's Now Playing info
@@ -160,6 +234,11 @@ public extension PlaybackEngine {
             return
         }
         
+        // Connected at the first load (not at init) because this is the moment this engine first publishes Now Playing info, so the engine that shows the info is the engine that answers its commands. An engine which never loads anything never takes the commands away from the one that does.
+        if false == hasInstalledRemoteTransportControls {
+            installRemoteTransportControls()
+        }
+        
         let playerItem = AVPlayerItem(item)
         
         // Subscribed per-item (with the item as the notification's object) so finishing can never be misattributed to whatever item happens to be current when the notification lands
@@ -169,7 +248,7 @@ public extension PlaybackEngine {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in
                 guard let self else { return }
-                delegate?.playbackEngine(self, didFinishPlaying: item)
+                send(.finished(item: item))
             }
         
         // Scoped to this item for the same reason, so a seek is never attributed to a track which has since been replaced
@@ -198,7 +277,7 @@ public extension PlaybackEngine {
         if let seconds {
             log(info: "Holding a restored playback position of \(seconds)s until the item becomes ready")
             
-            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
+            let targetTime = CMTime(seconds: seconds, preferredTimescale: .commonMedia)
             
             itemReadinessObservation = playerItem.observe(\.status, options: [.initial, .new]) { [player] item, _ in
                 guard .readyToPlay == item.status else { return }
@@ -228,6 +307,7 @@ public extension PlaybackEngine {
         // Published immediately with whatever's known so far, so remote controls never sit on the previous track's info (or their own "Unknown Artist" placeholders) while metadata resolves. Each metadata update pings this again to fill in the rest.
         publishNowPlayingInfo()
         
+        // Loaded from the asset rather than read from `AVPlayerItem.duration`, which reports `.indefinite` until the item is ready. Publishing an indefinite duration is what gives remote controls a track with no progress bar.
         Task { [self] in
             guard let duration = try? await playerItem.asset.load(.duration),
                   duration.seconds.isFinite,
@@ -250,22 +330,24 @@ public extension PlaybackEngine {
     }
     
     
-    /// Starts (or resumes) playback of the loaded item. Does nothing if nothing is loaded.
+    /// Starts playback of the loaded item. If the item played to its end, playback starts again at the start of the item.
+    ///
+    /// This method has no effect when no item is loaded.
     func play() {
-        player.play()
+        player.playFromStartIfFinished()
     }
     
     
-    /// Pauses playback, leaving the playhead where it is
+    /// Pauses playback. The playhead stays where it is.
     func pause() {
         player.pause()
     }
     
     
-    /// Pauses if playing, plays if paused — what headphone buttons and most car head units send
+    /// Pauses playback if the item plays, and starts playback if the item is paused. Headphone buttons and many car controls send this command.
     func togglePlayPause() {
-        if 0 == player.rate {
-            player.play()
+        if player.isPaused {
+            player.playFromStartIfFinished()
         }
         else {
             player.pause()
@@ -273,14 +355,14 @@ public extension PlaybackEngine {
     }
     
     
-    /// Moves the playhead. The resulting time jump republishes the new position to remote controls on its own.
-    /// - Parameter seconds: Where to go, in seconds from the start of the item
+    /// Moves the playhead. The engine then writes the new position to the Now Playing info.
+    /// - Parameter seconds: The new position, in seconds from the start of the loaded item
     func seek(to seconds: TimeInterval) {
-        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
+        player.seek(to: CMTime(seconds: seconds, preferredTimescale: .commonMedia))
     }
     
     
-    /// Rewinds the loaded item to its beginning and plays it
+    /// Moves the playhead to the start of the loaded item, and starts playback
     func replayFromStart() {
         player.seek(to: .zero)
         player.play()
@@ -293,12 +375,12 @@ public extension PlaybackEngine {
 
 public extension PlaybackEngine {
     
-    /// Returns the current state of searching for the given metadata of the loaded item, including the found metadata itself.
+    /// Returns the result of the search for `key` in the metadata of the loaded item.
     ///
-    /// Reading this from a view's `body` is enough to re-render that view when the answer changes.
+    /// When a view calls this function from its `body`, SwiftUI shows that view again when the search finds a value.
     ///
-    /// - Parameter key: Identifies the metadata you want
-    /// - Returns: The search's state, or `nil` if nothing is loaded
+    /// - Parameter key: The metadata to find
+    /// - Returns: The state of the search, and the value when the search found one. `nil` when no item is loaded, and when the metadata of the item could not be read.
     func metadata<Value>(_ key: AsyncMetadataKey<Value>) -> MetadataSearchResult<Value>? {
         access(keyPath: \.metadataRevision) // Registers the Observation dependency; see the property's doc
         return currentItem?.metadata?.get(key)
@@ -311,14 +393,16 @@ public extension PlaybackEngine {
 
 private extension PlaybackEngine {
     
-    /// The one and only writer of ``isPlaying``. Also where the side effects of a play/pause transition live, regardless of who caused it (an in-app tap, a remote command, an interruption, the end of the file).
+    /// Keeps `isPlaying` the same as the state of the player, and does the work that must occur each time playback starts or stops.
+    ///
+    /// This observer is the only code that writes `isPlaying`. The work occurs here for all causes of the change. The cause can be a tap in the app, a remote command, an interruption, or the end of the item.
     func installRateObserver() {
         player.publisher(for: \.rate)
-            .sink { [weak self] rate in
+            .sink { [weak self] _ in
                 guard let self else { return }
                 
                 let wasPlaying = isPlaying
-                isPlaying = rate > 0
+                isPlaying = player.isPlaying
                 
                 guard wasPlaying != isPlaying else { return }
                 
@@ -326,33 +410,42 @@ private extension PlaybackEngine {
                     UIApplication.shared.beginReceivingRemoteControlEvents()
                 }
                 else {
-                    delegate?.playbackEngineDidPause(self)
+                    send(.paused)
                 }
                 
-                // The published rate is what the system extrapolates elapsed time from, so it has to change when playback does or the remote progress bar keeps advancing through a paused track
+                // The system (Control Center, the Lock Screen) calculates the elapsed time from the rate in the Now Playing info.
+                // Thus, write the new rate there each time playback starts or stops.
+                // If not, the remote progress bar continues to move while playback is paused.
                 updateNowPlayingPlaybackPosition()
             }
             .store(in: &sinks)
     }
     
     
-    /// Reports where playback is, both as ``currentTime`` and to the delegate — which is how a queue knows where to snapshot, and how history knows when a file has been played enough to count.
+    /// Keeps `currentTime` correct, and sends `Event.positionChanged(item:seconds:)` for the loaded item
     func installPeriodicTimeObserver() {
         periodicTimeObserverToken = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: .commonMedia),
             queue: .main
         ) { [weak self] time in
             guard let self else { return }
             
             MainActor.assumeIsolated {
                 self.currentTime = time.seconds
-                self.delegate?.playbackEngine(self, playbackPositionDidChangeTo: time.seconds)
+                
+                if let currentItem = self.currentItem {
+                    self.send(.positionChanged(item: currentItem, seconds: time.seconds))
+                }
             }
         }
     }
     
     
+    /// In debug builds, records each audio session interruption (for example, a phone call or an alarm) in the log.
+    ///
+    /// This function does not change playback. When an interruption starts, the system pauses the player, and the rate observer sets `isPlaying` to `false`. When the interruption ends, playback stays paused.
     func installInterruptionObserver() {
+        #if DEBUG
         NotificationCenter.default
             .publisher(for: AVAudioSession.interruptionNotification)
             .sink { notification in
@@ -362,24 +455,25 @@ private extension PlaybackEngine {
                 
                 switch interruptType {
                 case .began:
-                    print("Interrupt began")
+                    log(verbose: "Audio session interruption began")
                     
                 case .ended:
-                    print("Interrupt ended")
+                    log(verbose: "Audio session interruption ended")
                     
                 @unknown default:
-                    print("Fancy New Interrupt They Don't Want You To Know About", interruptType)
+                    log(verbose: "Audio session interruption of an unknown type: \(interruptType)")
                 }
             }
             .store(in: &sinks)
+        #endif
     }
     
     
-    /// Pulls the current media's cover art out of its metadata, but only for media with no video of its own.
+    /// Sets `artwork` to the cover art of the loaded item, or to the placeholder art when the item has no cover art. Sets `artwork` to `nil` when the item has video.
     ///
-    /// Media with no embedded art falls back to the app's own placeholder, so the player region always has something deliberate in it — which is also what lets that region be drawn opaque, hiding `AVPlayerViewController`'s default audio placeholder underneath.
+    /// The placeholder makes sure that the player area always shows an image that the app selected. It also lets `Player` make that area not transparent. Thus the default audio image of `AVPlayerViewController` does not show.
     ///
-    /// Called both when the video-track inspection finishes and whenever metadata updates, since either can be the last to arrive.
+    /// Call this function when the video-track check is complete and when the metadata changes. These 2 events can occur in a different sequence each time.
     func refreshArtwork() {
         guard !hasVideoTrack else {
             artwork = nil // Video fills this region itself; nothing should be drawn over it
@@ -397,7 +491,12 @@ private extension PlaybackEngine {
 
 private extension PlaybackEngine {
     
+    /// Connects the remote commands (Control Center, the Lock Screen, headphone buttons, car controls) to the player.
+    ///
+    /// The process has only 1 command center. Thus this function first removes all handlers, and the remote commands then control the player of the engine that called this function last.
     func installRemoteTransportControls() {
+        hasInstalledRemoteTransportControls = true
+        
         // Get the shared MPRemoteCommandCenter
         let commandCenter = MPRemoteCommandCenter.shared()
         
@@ -410,23 +509,23 @@ private extension PlaybackEngine {
         // These capture `player` rather than this engine's `isPlaying`, because the handlers outlive any given value of that fact, and because driving the player directly lets the rate observer sync `isPlaying` back the same way an in-app tap would
         
         // Add handler for Play Command
-        commandCenter.playCommand.addTarget { [player] event in
-            guard 0 == player.rate else { return .commandFailed } // Already playing
-            player.play()
+        commandCenter.playCommand.addTarget { [player] _ in
+            guard player.isPaused else { return .commandFailed }
+            player.playFromStartIfFinished()
             return .success
         }
         
         // Add handler for Pause Command
-        commandCenter.pauseCommand.addTarget { [player] event in
-            guard 0 != player.rate else { return .commandFailed } // Already paused
+        commandCenter.pauseCommand.addTarget { [player] _ in
+            guard player.isPlaying else { return .commandFailed }
             player.pause()
             return .success
         }
         
         // Add handler for Toggle Play/Pause Command, which is what headphone buttons and many car head units send instead of the discrete commands above
-        commandCenter.togglePlayPauseCommand.addTarget { [player] event in
-            if 0 == player.rate {
-                player.play()
+        commandCenter.togglePlayPauseCommand.addTarget { [player] _ in
+            if player.isPaused {
+                player.playFromStartIfFinished()
             }
             else {
                 player.pause()
@@ -438,12 +537,15 @@ private extension PlaybackEngine {
         commandCenter.changePlaybackPositionCommand.addTarget { [player] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             
-            player.seek(to: CMTime(seconds: event.positionTime, preferredTimescale: 600))
+            player.seek(to: CMTime(seconds: event.positionTime, preferredTimescale: .commonMedia))
             return .success
         }
     }
     
     
+    /// Writes the Now Playing info for the loaded item. When no item is loaded, this function removes the Now Playing info.
+    ///
+    /// Call this function when the loaded item or its metadata changes. When only the playback position or the rate changes, call `updateNowPlayingPlaybackPosition()`. The system limits how frequently an app can change the Now Playing metadata.
     func publishNowPlayingInfo() {
         guard let currentItem else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
@@ -488,10 +590,11 @@ private extension PlaybackEngine {
     }
     
     
-    /// Republishes only where playback currently is, leaving already-published metadata untouched.
+    /// Writes only the playback position and the rate to the Now Playing info. The other values in the Now Playing info do not change.
     ///
-    /// Seeking and pausing don't change the title, artist, or album — and rewriting those unchanged values is actively harmful rather than merely wasteful: iOS throttles Now Playing *metadata* updates (logging "Application exceeded audio metadata throttle limit"), and a throttled title write is **dropped**, not deferred. Republishing the whole dictionary on every seek is what makes the title and artist visibly blank out and reappear while scrubbing from Control Center.
+    /// Call this function after a seek, and when playback starts or stops. When the loaded item or its metadata changes, call `publishNowPlayingInfo()`. The system limits how frequently an app can change the Now Playing metadata.
     func updateNowPlayingPlaybackPosition() {
+        // Over the throttle limit, the system drops the write and logs "Application exceeded audio metadata throttle limit". The user sees the title and the artist blink out and back while scrubbing from Control Center. Rewriting only the position keys keeps this path cheap.
         guard var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo else {
             return // Nothing published yet, so there's no position to correct — a full publish will happen when media loads
         }
@@ -502,7 +605,9 @@ private extension PlaybackEngine {
     }
     
     
-    /// Writes where playback is and how fast it's moving. Shared so a full publish and a position-only update can never disagree about what "current position" means.
+    /// Adds the playback position and the rate to `nowPlayingInfo`.
+    ///
+    /// The 2 functions `publishNowPlayingInfo()` and `updateNowPlayingPlaybackPosition()` use this function. Thus they always write the same position values.
     func addPlaybackPositionInfo(to nowPlayingInfo: inout [String : Any]) {
         // The system extrapolates elapsed time from the last-published value and the rate, so these two are what make a progress bar appear and move at all. Published on load, on play/pause, and on seek — deliberately *not* on a timer, since frequent writes get throttled during long background playback and go stale without warning.
         let elapsed = player.currentTime().seconds
@@ -515,4 +620,16 @@ private extension PlaybackEngine {
         
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = player.rate
     }
+}
+
+
+
+// MARK: - Constants
+
+private extension CMTimeScale {
+    
+    /// The timescale for times in this engine: 600 time units in each second.
+    ///
+    /// 600 divided by each of the frame rates 24, 25, 30 & 60 fps gives an integer. Thus each frame time at these rates is an integer number of units.
+    static let commonMedia: Self = 600
 }

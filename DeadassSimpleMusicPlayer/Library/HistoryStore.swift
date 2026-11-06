@@ -12,37 +12,48 @@ import SimpleLogging
 
 
 
-/// What's been played, and the responsibility of keeping that durable.
+/// Keeps the history of what played, and saves it to disk.
 ///
-/// A `Store` holds data whose lifecycle is independent of any player: history means something with nothing loaded and the app freshly launched. Mutations go through this store's methods so each one lands on disk the moment it happens — rare events, so immediate writes are cheap.
+/// Use this store to show the history, to change how much history to keep, or to remove the history. The history stays when nothing is loaded, and it comes back after the app starts again.
 ///
-/// This store doesn't know *when* something counts as played; that's a judgment about playback position, made by whoever holds both the queue and the engine (``PlayerSession``), which then calls ``record(_:displayName:)``.
+/// Each change saves to disk immediately. Changes to the history do not occur frequently. Thus each change can go to disk immediately with no performance problem.
+///
+/// This store does not make the decision about when a file played for sufficient time. `PlayerSession` makes that decision, because it has the queue and the engine. Then it calls `record(_:displayName:)`.
 @MainActor
 @Observable
 public final class HistoryStore {
     
     #if DEBUG
+    /// What played. Change the history through the methods of this store (for example, `record(_:displayName:)`). Then each change goes to disk immediately. Debug builds can set this property directly, for demo data.
     public var playbackHistory = PlaybackHistory()
     #else
-    /// What's been played. Read-only from outside; mutations go through store methods (like ``record(_:displayName:)``) so each one lands on disk the moment it happens.
+    /// What played. Change the history through the methods of this store (for example, `record(_:displayName:)`). Then each change goes to disk immediately.
     public private(set) var playbackHistory = PlaybackHistory()
     #endif
     
-    /// What's been played, newest first. Sugar for ``playbackHistory``'s entries, so `session.history.entries` reads the way it should.
+    /// What played, with the newest entry first
     public var entries: [PlaybackHistory.Entry] {
         playbackHistory.entries
     }
     
-    /// How far back history is kept. Change it with ``setRetention(_:)`` so the change lands on disk.
+    /// How much history to keep.
+    ///
+    /// A change removes the entries that the new value does not keep, and saves to disk immediately. You can bind a SwiftUI control to this property.
     public var retention: PlaybackHistory.Retention {
-        playbackHistory.retention
+        get {
+            playbackHistory.retention
+        }
+        set {
+            playbackHistory.retention = newValue
+            saveNow()
+        }
     }
     
-    /// Holds the "History" document. `nil` means persistence is unavailable and the store runs memory-only.
+    /// Where this store keeps its data on disk, or `nil` when this store runs memory-only
     private let documentStore: JSONDocumentStore?
     
     
-    /// - Parameter documentStore: Where to keep the history document, or `nil` to run memory-only (like in SwiftUI previews)
+    /// - Parameter documentStore: Where to keep the data on disk, or `nil` to run memory-only (for example, in SwiftUI previews)
     public init(documentStore: JSONDocumentStore?) {
         self.documentStore = documentStore
     }
@@ -54,9 +65,11 @@ public final class HistoryStore {
 
 public extension HistoryStore {
     
-    /// Reads history back from disk, applying retention (time marched on while the app was closed). Does nothing if persistence is unavailable or nothing was saved.
+    /// Reads the history from disk, and removes the entries that `retention` does not keep. The app was closed for some time. Thus `retention` can remove some entries at this time.
+    ///
+    /// This function does nothing when this store runs memory-only, and when no history was saved.
     func load() {
-        guard let documentStore else { return }
+        guard let documentStore else { return } // Expected when this store runs memory-only, so there is nothing to report
         
         do {
             if var restoredHistory = try documentStore.load(PlaybackHistory.self, named: Self.historyDocumentName) {
@@ -65,7 +78,7 @@ public extension HistoryStore {
             }
         }
         catch {
-            log(error: "The play history document exists but couldn't be read: \(error)")
+            log(error: error, "The play history document exists but couldn't be read")
         }
     }
 }
@@ -76,22 +89,17 @@ public extension HistoryStore {
 
 public extension HistoryStore {
     
-    /// Puts a file into history right now, and onto disk
+    /// Adds a file to the history, and saves the history to disk
+    /// - Parameters:
+    ///   - reference:   The file that played
+    ///   - displayName: The name to show for the entry in a list
     func record(_ reference: MediaReference, displayName: String) {
         playbackHistory.record(reference, displayName: displayName)
         saveNow()
     }
     
     
-    /// Changes how far back history is kept, immediately discarding anything the new setting excludes
-    func setRetention(_ retention: PlaybackHistory.Retention) {
-        playbackHistory.retention = retention
-        playbackHistory.applyRetention()
-        saveNow()
-    }
-    
-    
-    /// Empties the history entirely
+    /// Removes all entries from the history, and saves the history to disk
     func clear() {
         playbackHistory.clear()
         saveNow()
@@ -102,17 +110,19 @@ public extension HistoryStore {
 
 private extension HistoryStore {
     
+    /// The name of the document that contains the history
     static let historyDocumentName = "History"
     
     
+    /// Saves the history to disk immediately
     func saveNow() {
-        guard let documentStore else { return }
+        guard let documentStore else { return } // Expected when this store runs memory-only, so there is nothing to report
         
         do {
             try documentStore.save(playbackHistory, named: Self.historyDocumentName)
         }
         catch {
-            log(error: "Couldn't save the play history: \(error)")
+            log(error: error, "Couldn't save the play history")
         }
     }
 }

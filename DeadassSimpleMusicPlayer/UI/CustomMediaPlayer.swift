@@ -1,5 +1,5 @@
 //
-//  MediaPlayerView.swift
+//  CustomMediaPlayer.swift
 //  DeadassSimpleMusicPlayer
 //
 //  Created by Ky on 2024-06-08.
@@ -12,69 +12,38 @@ import SimpleLogging
 
 
 
-/// An all-in-one media player for SwiftUI.
+/// Shows the media of a `PlayerSession`, with the title and the artist below it.
 ///
-/// Batteries included: put this in your app, point it at a file, and it plays that file properly — Control Center and Lock Screen controls, Now Playing info, background audio, picture-in-picture, the lot. Or hand it a ``PlayerSession`` you own, and it plays whatever that session's queue is on, with the session's history and library along for the ride.
+/// Use this view when your app owns a `PlayerSession`, for example to keep a queue, a history and a library. To play files without a session of your own, use `MediaPlayer`.
 ///
-/// The batteries aren't in this view: they're in the session's ``PlaybackEngine``, which this view merely displays. That's what lets this view stay a view — it owns no playback state, so anything else (a pinned metadata header, an always-visible transport bar) can read and drive the very same engine.
-struct MediaPlayerView: View {
+/// This view keeps no playback state. It shows the `PlaybackEngine` of the session. Thus other views (for example, a metadata header or a transport bar) can read and control the same engine at the same time.
+struct CustomMediaPlayer: View {
     
+    /// Part of the layout decision in `useFullscreenUi`. At this time, the layout does not change with the width.
     @Environment(\.horizontalSizeClass)
     private var horizontalSizeClass
     
+    /// Selects the layout: a compact height shows the media full screen, with no title or artist
     @Environment(\.verticalSizeClass)
     private var verticalSizeClass
     
     // MARK: API
     
-    /// Everything this view shows and controls: the engine whose player is on screen, and the queue that feeds it.
-    ///
-    /// `@State` rather than `let` so that a session created by ``init(playing:autoplay:)`` survives this struct being re-initialized by its parent. For ``init(session:)`` the initial value is the caller's own object, and the caller keeps owning it.
-    @State
-    var session: PlayerSession
-    
-    /// Files the convenience initializers were handed, enqueued on first appearance. Empty for ``init(session:)``.
-    private let filesToEnqueue: [URL]
-    
-    /// Whether to start playing once ``filesToEnqueue`` has been loaded
-    private let autoplay: Bool
+    /// The session that this view shows. The caller owns the session. When the caller gives a different session, this view shows the new session.
+    let session: PlayerSession
     
     
     // MARK: Private state
     
+    /// The picture-in-picture state of the player
     @State
     private var pipStatus = Player.PipStatus.undefined
     
-    @State
-    private var hasEnqueuedFiles = false
     
-    
-    /// Plays whatever `session`'s queue is on, and displays it
-    /// - Parameter session: Owns the engine this view displays, and everything durable around it
+    /// Shows the media of `session`
+    /// - Parameter session: The session to show. Its engine plays the media, and its queue selects the media.
     init(session: PlayerSession) {
-        self._session = State(initialValue: session)
-        self.filesToEnqueue = []
-        self.autoplay = false
-    }
-    
-    
-    /// Plays the given files, and displays them. Batteries included, nothing written to disk.
-    ///
-    /// Builds its own memory-only ``PlayerSession``: remote controls, Now Playing info, and picture-in-picture all work, but no history or library is kept — a host app that only wants a file played shouldn't find this view quietly writing to stores it never asked for. Folders are opened recursively.
-    ///
-    /// - Parameters:
-    ///   - urls:     What to play, in order
-    ///   - autoplay: Whether to start playing as soon as the files are loaded. Defaults to `true`.
-    init(playing urls: [URL], autoplay: Bool = true) {
-        self._session = State(initialValue: PlayerSession(persisting: false))
-        self.filesToEnqueue = urls
-        self.autoplay = autoplay
-    }
-    
-    
-    /// Plays the given file, and displays it. Batteries included, nothing written to disk. See ``init(playing:autoplay:)``.
-    init(playing url: URL, autoplay: Bool = true) {
-        self.init(playing: [url], autoplay: autoplay)
+        self.session = session
     }
     
     
@@ -90,23 +59,20 @@ struct MediaPlayerView: View {
         }
         .background(Color(.secondarySystemBackground))
         .background(ignoresSafeAreaEdges: .all)
-        
-        
-        .task {
-            await enqueueFilesIfNeeded()
-        }
     }
 }
 
 
 
-private extension MediaPlayerView {
+private extension CustomMediaPlayer {
     
+    /// The engine of `session`
     var engine: PlaybackEngine {
         session.engine
     }
     
     
+    /// `true` when the media fills the screen with no title or artist, which is when the height is compact
     var useFullscreenUi: Bool {
         switch (width: horizontalSizeClass, height: verticalSizeClass) {
         case (width: _, height: .none),
@@ -120,35 +86,15 @@ private extension MediaPlayerView {
             false
         }
     }
-    
-    
-    /// The convenience initializers' payload, loaded exactly once per view lifetime
-    func enqueueFilesIfNeeded() async {
-        guard !hasEnqueuedFiles,
-              filesToEnqueue.isNotEmpty
-        else { return }
-        hasEnqueuedFiles = true
-        
-        var entries: [PlaylistEntry] = []
-        
-        for url in filesToEnqueue {
-            entries.append(contentsOf: await Playlist.entries(fromUrl: url, allowRecursion: true))
-        }
-        
-        session.nowPlaying.queue.append(contentsOf: entries)
-        
-        if autoplay {
-            engine.play()
-        }
-    }
 }
 
 
 
 // MARK: - Subviews
 
-private extension MediaPlayerView {
+private extension CustomMediaPlayer {
     
+    /// The title and the artist of the loaded item
     var metadataView: some View {
         VStack(alignment: .leading, spacing: 0) {
             titleView
@@ -175,6 +121,7 @@ private extension MediaPlayerView {
     }
     
     
+    /// The media itself: the video, or the cover art for audio
     var playerView: some View {
         Player(player: engine.player, artwork: engine.artwork, pipStatus: $pipStatus)
             .aspectRatio(16/9, contentMode: .fit)
@@ -188,8 +135,9 @@ private extension MediaPlayerView {
 
 // MARK: - Metadata
 
-private extension MediaPlayerView {
+private extension CustomMediaPlayer {
     
+    /// The title of the loaded item. While something loads, this view shows `loadingMessage` and not the title.
     @ViewBuilder
     var titleView: some View {
         if let loadingMessage = session.loadingMessage {
@@ -214,6 +162,7 @@ private extension MediaPlayerView {
     }
     
     
+    /// The artist of the loaded item, or an empty string while something loads
     var creatorText: LocalizedStringKey {
         guard nil == session.loadingMessage else { return "" }
         
@@ -233,6 +182,6 @@ private extension MediaPlayerView {
 
 #Preview("Nothing playing") {
     NavigationStack {
-        MediaPlayerView(session: PlayerSession(persisting: false))
+        CustomMediaPlayer(session: PlayerSession(persisting: false))
     }
 }

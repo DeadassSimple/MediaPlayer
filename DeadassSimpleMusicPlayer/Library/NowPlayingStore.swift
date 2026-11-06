@@ -12,21 +12,23 @@ import SimpleLogging
 
 
 
-/// The now-playing queue, its playback modes, and the responsibility of keeping them durable — plus the job of telling the ``PlaybackEngine`` what to play.
+/// Keeps the queue and the repeat mode, saves them to disk, and tells the `PlaybackEngine` which item to load.
 ///
-/// A `Store` holds data whose lifecycle is independent of any player: the queue survives relaunch (via ``NowPlayingSnapshot``), and means something before anything's loaded. This store is also the engine's driver: whenever the queue's current entry changes, that entry is loaded into the engine. "Change the current entry" and "load it into the player" are one synchronous step here, which is why there's no parked "play this next" intent anywhere — the old one existed only because the session didn't own the player.
+/// Use this store to read or change what plays at this time and what plays next. The queue and the repeat mode stay when nothing is loaded, and they come back after the app starts again.
 ///
-/// Persistence is reactive, with cadence matched to the data's nature:
-/// - **Structural changes** (queue contents, current entry, modes) schedule a short-debounced snapshot write, via `didSet` — so even mutations arriving through SwiftUI bindings are caught without anyone remembering to save.
-/// - **Playback position** updates arrive constantly, so their writes are throttled.
-/// - **Moments of user expectation** (pausing, backgrounding) flush immediately via ``saveSnapshotNow()``.
+/// When the current entry of the queue changes, this store loads the item of that entry into the engine, in the same step. Thus the item in the engine always agrees with the current entry.
+///
+/// This store saves its data when the data changes. Thus you do not call a save function after each change:
+/// - A change to the queue or to the repeat mode saves after a short time. Thus a fast sequence of changes (for example, an import of a folder) causes only 1 write.
+/// - A change of the playback position saves after a longer time, because the position changes all the time during playback.
+/// - `saveSnapshotNow()` saves immediately. Call it at the moments when the user wants their position to be safe, for example when the app goes to the background.
 @MainActor
 @Observable
 public final class NowPlayingStore {
     
-    /// The now-playing queue. Mutate freely (including through SwiftUI bindings); persistence reacts automatically, and so does the engine when the current entry changes.
+    /// The entries that play at this time and after.
     ///
-    /// A current-entry change loads the new entry *paused*. Operations which mean "and play it" (``play(entryWithID:)``, ``loadIntoQueue(_:andPlay:)``, advancing after a file finishes) follow up with ``PlaybackEngine/play()`` themselves. A queue edit which happens to move the current pointer (like removing the current entry) therefore doesn't start playing on its own — same as before this store existed.
+    /// You can change the queue directly, also through a SwiftUI binding. The store saves each change. When the change moves the current entry to a different item, the store loads that item into the engine, paused. Thus a change such as the removal of the current entry does not start playback. To play the new current entry, use `play(entryWithID:)` or call `PlaybackEngine.play()`.
     public var queue: Playlist = .empty {
         didSet {
             guard !isRestoring else { return }
@@ -35,12 +37,13 @@ public final class NowPlayingStore {
             let previousItem = oldValue.currentEntry?.mediaItem
             let currentItem = queue.currentEntry?.mediaItem
             if previousItem != currentItem {
+                playbackPositionSeconds = nil // A position in the previous item must never be saved as the position of this one
                 engine.load(currentItem, autoplay: false)
             }
         }
     }
     
-    /// What the player should do when the current file finishes. Persisted with the queue snapshot; never written into saved playlists.
+    /// What the engine does when the current item plays to its end. The store saves this value with the queue. Saved playlists do not contain it.
     public var repeatMode: RepeatMode = .off {
         didSet {
             guard !isRestoring else { return }
@@ -48,33 +51,35 @@ public final class NowPlayingStore {
         }
     }
     
-    /// The engine this store feeds
+    /// The engine that this store loads items into
     public let engine: PlaybackEngine
     
     
     // MARK: Non-observable internals
     
-    /// Where playback currently is in the current entry's file, remembered so snapshots can include it. Only ever meaningful for the current entry.
+    /// The playback position in the item of the current entry, in seconds, or `nil` when the position is not known. The snapshot contains this value, so the next start of the app can continue from the same position.
     @ObservationIgnored
     private var playbackPositionSeconds: Double? = nil
     
-    /// `true` only while restored state is being assigned, so `didSet`-driven saves and engine loads don't pointlessly redo what restore is doing explicitly
+    /// `true` only while `load()` sets the restored values. Thus the `didSet` observers do not save or load again what `load()` sets directly.
     @ObservationIgnored
     private var isRestoring = false
     
+    /// The scheduled snapshot save, or `nil` when no save is scheduled
     @ObservationIgnored
     private var pendingSnapshotSave: Task<Void, Never>? = nil
     
+    /// The time of the scheduled snapshot save, or `nil` when no save is scheduled
     @ObservationIgnored
     private var pendingSnapshotSaveDeadline: ContinuousClock.Instant? = nil
     
-    /// Holds the "Now Playing" document. `nil` means persistence is unavailable and the store runs memory-only.
+    /// Where this store keeps its data on disk, or `nil` when this store runs memory-only
     private let documentStore: JSONDocumentStore?
     
     
     /// - Parameters:
-    ///   - engine:        The engine to load the current entry into
-    ///   - documentStore: Where to keep the Now Playing snapshot, or `nil` to run memory-only (like in SwiftUI previews)
+    ///   - engine:        The engine to load the item of the current entry into
+    ///   - documentStore: Where to keep the data on disk, or `nil` to run memory-only (for example, in SwiftUI previews)
     public init(engine: PlaybackEngine, documentStore: JSONDocumentStore?) {
         self.engine = engine
         self.documentStore = documentStore
@@ -87,11 +92,13 @@ public final class NowPlayingStore {
 
 public extension NowPlayingStore {
     
-    /// Rebuilds the queue from whatever the previous session left behind, re-resolving every file, and loads the restored current entry into the engine at the restored position — paused, waiting for the user.
+    /// Reads the queue, the repeat mode and the playback position that the previous session saved.
     ///
-    /// Does nothing if persistence is unavailable or nothing was saved.
+    /// Then this function loads the current entry into the engine, paused, at that position. The store finds each file of the queue again, which can be slow for a large queue.
+    ///
+    /// This function does nothing when this store runs memory-only, and when no previous session saved data.
     func load() async {
-        guard let documentStore else { return }
+        guard let documentStore else { return } // Expected when this store runs memory-only, so there is nothing to report
         
         // All the slow, suspending work happens into locals first; assignment at the bottom is synchronous, so the `isRestoring` gate can't accidentally swallow a save for some unrelated mutation which interleaves with a suspension here
         
@@ -107,7 +114,7 @@ public extension NowPlayingStore {
             }
         }
         catch {
-            log(error: "The previous session's Now Playing snapshot exists but couldn't be read: \(error)")
+            log(error: error, "The previous session's Now Playing snapshot exists but couldn't be read")
         }
         
         
@@ -136,9 +143,11 @@ public extension NowPlayingStore {
 
 public extension NowPlayingStore {
     
-    /// Jumps the queue to the given entry and plays it.
+    /// Makes the entry with the given ID the current entry, and starts playback.
     ///
-    /// No-ops for unplayable entries. For the entry that's already current, just makes sure it's playing.
+    /// When the entry is the current entry, playback continues or starts. When the item of the entry played to its end, playback starts again at the start of the item.
+    ///
+    /// This function does nothing when the file of the entry is not available.
     func play(entryWithID id: PlaylistEntry.ID) {
         guard queue.entry(withID: id)?.isPlayable ?? false else { return }
         
@@ -147,9 +156,9 @@ public extension NowPlayingStore {
     }
     
     
-    /// Re-opens something from history: appends it to the queue (the queue is not disturbed beyond that) and plays it.
+    /// Adds a history entry to the end of the queue, makes it the current entry, and starts playback. The other entries of the queue do not change.
     ///
-    /// A history entry is only a durable reference, so the file must be re-resolved — which can fail if it's moved or gone. Failure is logged and otherwise silent for now.
+    /// A history entry contains only a reference to its file, so this function must find the file again. When the file moved or was deleted, this function logs the error and does nothing more.
     func replay(_ historyEntry: PlaybackHistory.Entry) async {
         guard let item = await MediaItem(resolving: historyEntry.reference) else {
             log(error: "Couldn't reopen “\(historyEntry.displayName)” from history — the file may have moved or been deleted")
@@ -164,13 +173,13 @@ public extension NowPlayingStore {
     }
     
     
-    /// Replaces the now-playing queue with the given saved playlist's contents, re-resolving every file.
+    /// Replaces the queue with the entries of a saved playlist.
     ///
-    /// Files that can't be reached become unavailable slots (visible, skipped by playback) rather than vanishing — the playlist the user sees should be the playlist they saved.
+    /// The store finds each file of the playlist again. A file that the store cannot find becomes an entry that is not available: the queue shows it, and playback skips it. Thus the queue shows the playlist that the user saved.
     ///
     /// - Parameters:
     ///   - playlist: The saved playlist to load
-    ///   - andPlay:  Whether loading should also start playing (the common reason anyone loads a playlist). Defaults to `true`.
+    ///   - andPlay:  `true` starts playback after the load. Defaults to `true`.
     func loadIntoQueue(_ playlist: SavedPlaylist, andPlay: Bool = true) async {
         var entries: [PlaylistEntry] = []
         entries.reserveCapacity(playlist.items.count)
@@ -189,9 +198,9 @@ public extension NowPlayingStore {
     }
     
     
-    /// The current file played all the way to its end; what happens next is the repeat mode's call.
+    /// Selects what plays after the current item played to its end. The result changes with `repeatMode`.
     ///
-    /// Called by whoever hears the engine finish (``PlayerSession``). Advancing to another entry loads it paused (via the `queue` observer), so playing it is done here explicitly.
+    /// Call this function when the engine sends `PlaybackEngine.Event.finished(item:)` for the item of the current entry.
     func advanceAfterCurrentItemFinished() {
         switch repeatMode {
         case .currentItem:
@@ -221,9 +230,9 @@ public extension NowPlayingStore {
 
 public extension NowPlayingStore {
     
-    /// Notes where playback currently is, so session restore can pick up mid-file.
+    /// Records the playback position in the item of the current entry, so the next start of the app can continue from that position.
     ///
-    /// Called frequently (from the engine's periodic time observer), so the resulting disk writes are throttled rather than immediate — a crash loses at most a few seconds of position, never any structure.
+    /// This function saves to disk only after some time, because the position changes all the time during playback. Thus after a crash, the saved position can be some seconds before the correct position. The saved queue is always correct.
     func notePlaybackPosition(seconds: Double) {
         guard seconds.isFinite,
               seconds >= 0
@@ -234,15 +243,15 @@ public extension NowPlayingStore {
     }
     
     
-    /// Writes the now-playing snapshot right now, superseding any scheduled write.
+    /// Saves the queue, the repeat mode and the playback position immediately. A save that was scheduled is then not necessary, so this function cancels it.
     ///
-    /// For the moments a user implicitly expects their state to be safe: pausing, backgrounding, and anywhere else "if the app died right now" would be a reasonable thought.
+    /// Call this function when the user wants their position to be safe. For example, call it when playback pauses, and when the app goes to the background.
     func saveSnapshotNow() {
         pendingSnapshotSave?.cancel()
         pendingSnapshotSave = nil
         pendingSnapshotSaveDeadline = nil
         
-        guard let documentStore else { return }
+        guard let documentStore else { return } // Expected when this store runs memory-only, so there is nothing to report
         
         do {
             try documentStore.save(
@@ -253,7 +262,7 @@ public extension NowPlayingStore {
                 named: Self.nowPlayingDocumentName)
         }
         catch {
-            log(error: "Couldn't save the Now Playing snapshot: \(error)")
+            log(error: error, "Couldn't save the Now Playing snapshot")
         }
     }
 }
@@ -262,16 +271,19 @@ public extension NowPlayingStore {
 
 private extension NowPlayingStore {
     
+    /// The name of the document that contains the snapshot
     static let nowPlayingDocumentName = "Now Playing"
     
-    /// How long structural changes (queue, modes) wait before hitting disk, coalescing bursts (like a 200-file folder import) into one write
+    /// The time before the store saves a change to the queue or to the modes. Thus a fast sequence of changes (for example, an import of 200 files) causes only 1 write.
     static let structuralSaveDebounce = Duration.seconds(1)
     
-    /// How long position-only changes wait before hitting disk. Position changes constantly during playback; a crash losing a few seconds of position is fine, so this trades staleness for not hammering storage.
+    /// The time before the store saves a change of the playback position. The position changes all the time during playback. After a crash, a saved position that is some seconds before the correct position is satisfactory, and this time prevents too many writes to storage.
     static let positionSaveThrottle = Duration.seconds(5)
     
     
-    /// Coalesces save requests: a write already scheduled to happen at least this soon satisfies the request as-is; otherwise the schedule tightens to the sooner deadline. This is what lets rapid structural changes and slow positional ones share one pending write.
+    /// Makes sure that a snapshot save occurs at the latest `delay` after this call.
+    ///
+    /// When a save is scheduled at or before that time, this function does nothing. If not, this function moves the scheduled save to that time. Thus fast changes to the queue and slow changes of the position share 1 scheduled save.
     func scheduleSnapshotSave(within delay: Duration) {
         let deadline = ContinuousClock.now + delay
         

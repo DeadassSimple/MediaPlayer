@@ -13,33 +13,39 @@ import SimpleLogging
 
 
 
-/// The long-lived heart of playback, and the one object a view needs to hold.
+/// Connects the playback engine with the queue, the history and the saved playlists. To play media, a view must have only this object.
 ///
-/// This is a thin facade composing four parts, each of which a developer can reach for directly when that's the thing they need:
-/// - ``engine`` — ``PlaybackEngine``: the live machinery for playing one item well. Owns the `AVPlayer`; knows nothing of queues. Exists only while something's loaded, persists nothing.
-/// - ``nowPlaying`` — ``NowPlayingStore``: the queue and repeat mode, kept durable, and the engine's driver.
-/// - ``history`` — ``HistoryStore``: what's been played, kept durable.
-/// - ``library`` — ``PlaylistLibraryStore``: the saved playlists, kept durable.
+/// Make 1 session, and keep it for the life of the app. Give it to `CustomMediaPlayer` to show its media. To use 1 part directly, use these properties:
+/// - `engine` (`PlaybackEngine`): plays 1 item. It owns the `AVPlayer`, does not know about queues, and saves nothing.
+/// - `nowPlaying` (`NowPlayingStore`): the queue and the `RepeatMode`. It saves them, and tells the engine which item to load.
+/// - `history` (`HistoryStore`): what played. It saves the history.
+/// - `library` (`PlaylistLibraryStore`): the saved playlists. It saves them.
 ///
-/// The rule for what's where: if it's a `Store`, it's data with a lifecycle independent of any player, and it persists itself; if it's the `Engine`, it's live machinery that exists only while something is loaded, and it persists nothing.
+/// The names show the difference. A `Store` keeps data that stays when nothing is loaded, and it saves that data. The `Engine` plays the loaded item, and it saves nothing.
 ///
-/// What remains here is only what needs more than one part at once: session restore, the moments when playback events become history, saving the queue as a playlist and loading one back, and the app-wide loading message. The session is also the engine's delegate, so it's where "a file finished" turns into "advance the queue" and "a file has played enough" turns into "record it".
+/// The session does only the work that uses more than 1 part:
+/// - It restores the previous session.
+/// - It adds items to the history when they played for sufficient time.
+/// - It saves the queue as a playlist, and loads a playlist into the queue.
+/// - It shows `loadingMessage`.
+///
+/// The session reads the events of the engine. Thus it moves the queue to the next entry when an item plays to its end.
 @MainActor
 @Observable
 public final class PlayerSession {
     
-    /// A human-readable description of whatever's currently loading (restoring last session, importing a folder, ...), or `nil` when nothing is.
+    /// A message that tells the user what loads at this time (for example, the previous session, or a folder), or `nil` when nothing loads.
     ///
-    /// Shared infrastructure: any long-running operation that should keep the "what's playing" screen from showing its empty state prematurely runs through ``withLoadingMessage(_:perform:)`` instead of setting this directly, so overlapping operations can't stomp on each other's message.
+    /// While this message is not `nil`, the player screen shows it and not the empty state. To show a message during a long operation, use `withLoadingMessage(_:perform:)`. Do not set this property directly. The function puts back the previous message after the operation. Thus 2 operations at the same time do not erase the message of each other.
     public private(set) var loadingMessage: LocalizedStringResource? = nil
     
-    /// The live machinery for playing whatever's current
+    /// Plays the item of the current entry
     public let engine: PlaybackEngine
     
-    /// The queue and its playback modes
+    /// The queue and the repeat mode
     public let nowPlaying: NowPlayingStore
     
-    /// What's been played
+    /// What played
     public let history: HistoryStore
     
     /// The saved playlists
@@ -48,15 +54,18 @@ public final class PlayerSession {
     
     // MARK: Non-observable internals
     
-    /// Which entry most recently earned a history recording, so arriving at the same entry only records once no matter how many times the threshold is reported
+    /// The ID of the last entry that went into the history. Thus 1 arrival at an entry adds only 1 history entry, when the engine reports the position many times.
     @ObservationIgnored
     private var historyRecordedEntryID: PlaylistEntry.ID? = nil
     
+    /// `true` after `loadIfNeeded()` started. Thus the restore occurs only 1 time.
     @ObservationIgnored
     private var hasRestored = false
     
     
-    /// - Parameter persisting: Pass `false` in contexts where touching real on-disk state would be wrong (like SwiftUI previews, or a host app embedding ``MediaPlayerView`` for a single file). Defaults to `true`.
+    /// Makes a session, and starts to read the events of its engine.
+    ///
+    /// - Parameter persisting: `true` keeps the data on disk. Use `false` where the session must not change data on disk. For example, use `false` in SwiftUI previews, and in `MediaPlayer`, which plays files for a host app. Defaults to `true`.
     public init(persisting: Bool = true) {
         var playerStore: JSONDocumentStore? = nil
         var playlistsStore: JSONDocumentStore? = nil
@@ -67,7 +76,7 @@ public final class PlayerSession {
                 playlistsStore = try JSONDocumentStore(subfolder: "Playlists")
             }
             catch {
-                log(error: "Persistence is unavailable, so this session will run memory-only: \(error)")
+                log(error: error, "Persistence is unavailable, so this session will run memory-only")
                 playerStore = nil
                 playlistsStore = nil
             }
@@ -79,7 +88,12 @@ public final class PlayerSession {
         self.history = HistoryStore(documentStore: playerStore)
         self.library = PlaylistLibraryStore(documentStore: playlistsStore)
         
-        engine.delegate = self
+        // The loop ends when the engine ends its streams, which it does when it is released along with this session
+        Task { [weak self, events = engine.events()] in
+            for await event in events {
+                self?.handle(event)
+            }
+        }
     }
 }
 
@@ -89,9 +103,9 @@ public final class PlayerSession {
 
 public extension PlayerSession {
     
-    /// Rebuilds this session from whatever the previous one left behind: the queue (re-resolving every file), the play position, the repeat mode, the history, and all saved playlists.
+    /// Reads what the previous session saved: the queue (and finds each of its files again), the playback position, the repeat mode, the history, and the saved playlists.
     ///
-    /// Safe to call any number of times; only the first call does anything.
+    /// You can call this function many times. Only the first call does the restore.
     func loadIfNeeded() async {
         guard !hasRestored else { return }
         hasRestored = true
@@ -210,15 +224,15 @@ public extension PlayerSession {
 
 public extension PlayerSession {
     
-    /// Runs `work` while ``loadingMessage`` reports `message`, restoring whatever ``loadingMessage`` was before (not necessarily `nil`) once `work` finishes.
+    /// Shows `message` as `loadingMessage` while `work` runs. When `work` is complete, this function puts back the message that was there before, which is not always `nil`.
     /// 
-    /// The "restore the previous value" behavior (rather than unconditionally clearing) is what lets two loading operations overlap without one's completion silently erasing the other's still-in-progress message — e.g. a folder import that finishes quickly while session restore is still running.
+    /// Thus 2 operations can run at the same time, and the operation that completes first does not erase the message of the other. For example, a short folder import can complete while the restore of the previous session continues.
     ///
     /// - Parameters:
-    ///   - message: Shown to the user until `work`returns
-    ///   - work:    Work to perform while the given loading messsage is on-screen
+    ///   - message: The message to show while `work` runs
+    ///   - work:    The operation
     ///
-    /// - Returns: Whatever `work` returns
+    /// - Returns: The value that `work` returns
     func withLoadingMessage<T>(_ message: LocalizedStringResource, perform work: () async -> T) async -> T {
         let previousMessage = loadingMessage
         loadingMessage = message
@@ -231,38 +245,55 @@ public extension PlayerSession {
 
 // MARK: - Playback events
 
-extension PlayerSession: PlaybackEngineDelegate {
+public extension PlayerSession {
     
-    /// How much of a file must play before it earns a place in history. Files shorter than this always earn their place by finishing.
-    public static let historyThresholdSeconds = 1.0
+    /// How long a file must play, in seconds, before it goes into the history. A file that is shorter than this goes into the history when it plays to its end.
+    static let historyThresholdSeconds = 1.0
+}
+
+
+
+private extension PlayerSession {
     
-    
-    public func playbackEngine(_ engine: PlaybackEngine, playbackPositionDidChangeTo seconds: TimeInterval) {
-        nowPlaying.notePlaybackPosition(seconds: seconds)
-        
-        if seconds >= Self.historyThresholdSeconds {
-            recordCurrentEntryInHistoryIfNeeded()
+    /// Changes the queue and the history for 1 event from the engine.
+    ///
+    /// An event can come after a different item loaded. Thus this function ignores an event about an item that is not the item of the current entry.
+    func handle(_ event: PlaybackEngine.Event) {
+        switch event {
+        case .positionChanged(item: let item, seconds: let seconds):
+            if isCurrent(item) {
+                nowPlaying.notePlaybackPosition(seconds: seconds)
+                
+                if seconds >= Self.historyThresholdSeconds {
+                    recordCurrentEntryInHistoryIfNeeded()
+                }
+            }
+            
+        case .finished(item: let item):
+            if isCurrent(item) {
+                recordCurrentEntryInHistoryIfNeeded() // Also how a file shorter than `historyThresholdSeconds` gets into history
+                nowPlaying.advanceAfterCurrentItemFinished()
+            }
+            else {
+                log(info: "Ignored the end of an item which is no longer current")
+            }
+            
+        case .paused:
+            nowPlaying.saveSnapshotNow() // Pausing is a moment the user implicitly expects their place to be remembered
         }
     }
     
     
-    /// Also the safety net for the history threshold: a file too short to ever cross ``historyThresholdSeconds`` earns its history place by finishing instead.
-    public func playbackEngine(_ engine: PlaybackEngine, didFinishPlaying item: MediaItem) {
-        recordCurrentEntryInHistoryIfNeeded()
-        nowPlaying.advanceAfterCurrentItemFinished()
+    /// `true` when `item` is the item of the current entry of the queue
+    func isCurrent(_ item: MediaItem) -> Bool {
+        nowPlaying.queue.currentEntry?.mediaItem == item
     }
     
     
-    /// Pausing is a moment the user implicitly expects their place to be remembered
-    public func playbackEngineDidPause(_ engine: PlaybackEngine) {
-        nowPlaying.saveSnapshotNow()
-    }
-    
-    
-    /// Puts the current entry into history — once per arrival at that entry, no matter how many times this is called.
+    /// Adds the current entry to the history, 1 time for each arrival at that entry.
     ///
-    /// Callers decide when "played enough" has happened (crossing ``historyThresholdSeconds``, or finishing a file too short to cross it); this method makes repeated and overlapping reports harmless so those callers can stay naive.
-    private func recordCurrentEntryInHistoryIfNeeded() {
+    /// The callers make the decision about when the file played for sufficient time. This function ignores the calls after the first. Thus the callers can call it many times.
+    func recordCurrentEntryInHistoryIfNeeded() {
         guard let entry = nowPlaying.queue.currentEntry,
               historyRecordedEntryID != entry.id
         else { return }
@@ -278,7 +309,9 @@ extension PlayerSession: PlaybackEngineDelegate {
 
 public extension PlayerSession {
     
-    /// Saves the queue's user-specified order as a new named playlist
+    /// Saves the entries of the queue, in the sequence that the user selected, as a new saved playlist
+    /// - Parameter name: The name of the new playlist
+    /// - Returns: The new playlist
     @discardableResult
     func saveQueueAsPlaylist(named name: String) -> SavedPlaylist {
         let playlist = SavedPlaylist(name: name, savingQueue: nowPlaying.queue)
@@ -287,13 +320,13 @@ public extension PlayerSession {
     }
     
     
-    /// Imports an M3U/M3U8 playlist, best-effort, matching its entries against every file this session knows: saved playlists, the queue, and play history. See ``PlaylistLibraryStore/importPlaylist(fromM3U8:suggestedName:matchingAgainst:)``.
+    /// Imports an M3U or M3U8 playlist, and compares its entries with all files that this session knows. These files come from the saved playlists, the queue, and the history. Refer to `PlaylistLibraryStore.importPlaylist(fromM3U8:suggestedName:matchingAgainst:)`.
     ///
     /// - Parameters:
-    ///   - data:          The playlist file's contents
-    ///   - suggestedName: What to call the import — typically the file's own name
+    ///   - data:          The contents of the playlist file
+    ///   - suggestedName: The name of the imported playlist, usually the name of the file
     ///
-    /// - Returns: A saved playlist and the number of failed track-imports, or `nil` if the given data is an invalid playlist
+    /// - Returns: The saved playlist and the number of entries that could not be imported, or `nil` when `data` is not a correct playlist
     func importPlaylist(fromM3U8 data: Data, suggestedName: String) -> (SavedPlaylist, failedTrackImportCount: Int)? {
         library.importPlaylist(fromM3U8: data, suggestedName: suggestedName, matchingAgainst: allKnownReferencesByFilename())
     }
@@ -303,7 +336,7 @@ public extension PlayerSession {
 
 private extension PlayerSession {
     
-    /// What to call an entry in history: the media's title when metadata has resolved by now, its filename otherwise
+    /// Returns the name to show for `entry` in the history: the title from the metadata when the search found it, and the filename when not
     func displayName(for entry: PlaylistEntry) -> String {
         if let metadata = entry.mediaItem?.metadata,
            let foundTitle = (try? metadata.get(.title).value) ?? nil,
@@ -316,9 +349,9 @@ private extension PlayerSession {
     }
     
     
-    /// Every file this app knows a durable way back to, indexed by filename — the matching pool for best-effort M3U8 import.
+    /// Returns all files that the app has access to, with the filename of each as its key. The M3U8 import compares its entries with these files.
     ///
-    /// Later sources win filename collisions, ordered so the freshest wins: history, then saved playlists, then the live queue.
+    /// This function reads the sources in this sequence: the history, then the saved playlists, then the queue. When 2 files have the same name, the file from the last source wins.
     func allKnownReferencesByFilename() -> [String: MediaReference] {
         var known: [String: MediaReference] = [:]
         

@@ -598,11 +598,10 @@ private extension LibraryView {
     
     /// Chooses how far back history is kept. Tightening the window prunes immediately.
     var retentionMenu: some View {
-        Menu(currentRetentionTitle, systemImage: "timer") {
-            Picker("Keep History", selection: Binding(
-                get: { session.history.retention },
-                set: { session.history.setRetention($0) })
-            ) {
+        @Bindable var history = session.history
+        
+        return Menu(currentRetentionTitle, systemImage: "timer") {
+            Picker("Keep History", selection: $history.retention) {
                 ForEach(RetentionPreset.allCases, id: \.self) { preset in
                     Text(preset.title)
                         .tag(preset.retention)

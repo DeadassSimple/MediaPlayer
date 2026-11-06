@@ -28,7 +28,7 @@ struct ContentView: View {
     
     var body: some View {
         NavigationStack {
-            MediaPlayerView(session: session)
+            CustomMediaPlayer(session: session)
             
                 .toolbar {
                     ToolbarItemGroup {

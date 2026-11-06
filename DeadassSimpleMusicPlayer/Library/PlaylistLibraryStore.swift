@@ -13,27 +13,30 @@ import SimpleLogging
 
 
 
-/// Every playlist the user has saved, and the responsibility of keeping them durable.
+/// Keeps the playlists that the user saved, and saves them to disk.
 ///
-/// A `Store` holds data whose lifecycle is independent of any player: the library is the library whether or not anything's playing. Mutations go through this store's methods so memory and disk never disagree.
+/// Use this store to show, add, change, delete or import saved playlists. The library stays when nothing is loaded, and it comes back after the app starts again.
 ///
-/// Knows nothing about the now-playing queue. "Save the queue as a playlist" and "load a playlist into the queue" are ``PlayerSession``'s to arrange, since only it holds both sides.
+/// Change the library only through the methods of this store. Each method changes the memory and the disk together, so the two always agree.
+///
+/// This store does not know about the queue. `PlayerSession` saves the queue as a playlist and loads a playlist into the queue, because it has the queue and this store.
 @MainActor
 @Observable
 public final class PlaylistLibraryStore {
     
     #if DEBUG
+    /// The saved playlists, sorted by name. Change them through the methods of this store (for example, `upsert(_:)`). Then the memory and the disk always agree. Debug builds can set this property directly, for demo data.
     public var savedPlaylists: [SavedPlaylist] = []
     #else
-    /// Every saved playlist, sorted by name. Read-only from outside; mutations go through store methods (like ``upsert(_:)``) so memory and disk never disagree.
+    /// The saved playlists, sorted by name. Change them through the methods of this store (for example, `upsert(_:)`). Then the memory and the disk always agree.
     public private(set) var savedPlaylists: [SavedPlaylist] = []
     #endif
     
-    /// Holds one document per saved playlist, named by the playlist's ID. `nil` means persistence is unavailable and the store runs memory-only.
+    /// Where this store keeps its data on disk, or `nil` when this store runs memory-only. Each saved playlist is 1 document, with the ID of the playlist as its name.
     private let documentStore: JSONDocumentStore?
     
     
-    /// - Parameter documentStore: Where to keep playlist documents, or `nil` to run memory-only (like in SwiftUI previews)
+    /// - Parameter documentStore: Where to keep the data on disk, or `nil` to run memory-only (for example, in SwiftUI previews)
     public init(documentStore: JSONDocumentStore?) {
         self.documentStore = documentStore
     }
@@ -45,9 +48,11 @@ public final class PlaylistLibraryStore {
 
 public extension PlaylistLibraryStore {
     
-    /// Reads every saved playlist back from disk, skipping (but leaving on disk) any that can't be read. Does nothing if persistence is unavailable.
+    /// Reads all saved playlists from disk. A playlist that this function cannot read stays on disk, but does not go into `savedPlaylists`.
+    ///
+    /// This function does nothing when this store runs memory-only.
     func load() {
-        guard let documentStore else { return }
+        guard let documentStore else { return } // Expected when this store runs memory-only, so there is nothing to report
         
         do {
             savedPlaylists = try documentStore
@@ -57,14 +62,14 @@ public extension PlaylistLibraryStore {
                         return try documentStore.load(SavedPlaylist.self, named: name)
                     }
                     catch {
-                        log(error: "Couldn't read the saved playlist document “\(name)”; skipping it (but leaving it on disk): \(error)")
+                        log(error: error, "Couldn't read the saved playlist document “\(name)”; skipping it (but leaving it on disk)")
                         return nil
                     }
                 }
                 .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         }
         catch {
-            log(error: "Couldn't list the saved playlist documents: \(error)")
+            log(error: error, "Couldn't list the saved playlist documents")
         }
     }
 }
@@ -75,7 +80,8 @@ public extension PlaylistLibraryStore {
 
 public extension PlaylistLibraryStore {
     
-    /// Adds a new saved playlist, or updates the existing one with the same ID — in memory and on disk together, so the two never disagree
+    /// Adds a saved playlist, or replaces the saved playlist that has the same ID. The memory and the disk change together.
+    /// - Parameter playlist: The playlist to add or replace
     func upsert(_ playlist: SavedPlaylist) {
         if let existingIndex = savedPlaylists.firstIndex(where: { playlist.id == $0.id }) {
             savedPlaylists[existingIndex] = playlist
@@ -86,24 +92,24 @@ public extension PlaylistLibraryStore {
         
         savedPlaylists.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         
-        guard let documentStore else { return }
+        guard let documentStore else { return } // Expected when this store runs memory-only, so there is nothing to report
         
         do {
             try documentStore.save(playlist, named: playlist.id.uuidString)
         }
         catch {
-            log(error: "Couldn't save the playlist “\(playlist.name)”: \(error)")
+            log(error: error, "Couldn't save the playlist “\(playlist.name)”")
         }
     }
     
     
-    /// Removes a saved playlist — from memory and disk together, so the two never disagree
+    /// Deletes a saved playlist. The memory and the disk change together.
     /// - Parameter id: The ID of the playlist to delete
-    /// - Throws: An error if the playlist couldn't be deleted
+    /// - Throws: The error from the disk, if this function cannot delete the document of the playlist
     func delete(playlistWithID id: SavedPlaylist.ID) throws {
         savedPlaylists.removeAll { id == $0.id }
         
-        guard let documentStore else { return }
+        guard let documentStore else { return } // Expected when this store runs memory-only, so there is nothing to report
         
         try documentStore.delete(documentNamed: id.uuidString)
     }
@@ -115,9 +121,12 @@ public extension PlaylistLibraryStore {
 
 public extension PlaylistLibraryStore {
     
-    /// Imports a playlist previously exported as this app's raw JSON.
+    /// Imports a playlist that this app exported as JSON.
     ///
-    /// The import receives a fresh identity, so importing can never silently overwrite an existing playlist that happens to share its ID (like re-importing your own export). Bookmark data survives the JSON round-trip, so on the same device an imported playlist's files usually resolve immediately.
+    /// The imported playlist gets a new ID. Thus an import cannot replace a saved playlist that has the same ID, for example when the user imports their own export again. The JSON contains the bookmark data of each file, so on the same device the files of an imported playlist are usually available immediately.
+    ///
+    /// - Parameter data: The contents of the exported file
+    /// - Returns: The imported playlist, or `nil` when `data` is not a playlist that this app exported
     @discardableResult
     func importPlaylist(fromExportedJSON data: Data) -> SavedPlaylist? {
         do {
@@ -128,22 +137,22 @@ public extension PlaylistLibraryStore {
             return playlist
         }
         catch {
-            log(error: "Couldn't import that file as a playlist: \(error)")
+            log(error: error, "Couldn't import that file as a playlist")
             return nil
         }
     }
     
     
-    /// Imports an M3U/M3U8 playlist, best-effort.
+    /// Imports an M3U or M3U8 playlist. This import cannot always find all of the files.
     ///
-    /// Sandboxing means bare filenames can't grant access to files this app has never been handed — so each entry is matched, by filename, against `knownReferences`: every file the app *already* knows. Matches become the imported playlist; strangers are counted and skipped, with the outcome logged. Perfect-someday: prompting the user to locate unmatched files.
+    /// The sandbox does not let the app open a file from its name only. Thus this function compares the filename of each entry with `knownReferences`, which contains the files that the app has access to. Each file that it finds goes into the imported playlist. This function counts and skips the other entries, and logs the result. A possible future change: let the user find the files that this function cannot find.
     ///
     /// - Parameters:
-    ///   - data:            The playlist file's contents
-    ///   - suggestedName:   What to call the import — typically the file's own name
-    ///   - knownReferences: Every file the app has a durable way back to, indexed by filename. This store only knows its own playlists' files; ``PlayerSession`` assembles the full pool from the queue and history too.
+    ///   - data:            The contents of the playlist file
+    ///   - suggestedName:   The name of the imported playlist, usually the name of the file
+    ///   - knownReferences: The files that the app has access to, with the filename of each as its key. This store knows only the files of its playlists. `PlayerSession` adds the files of the queue and of the history.
     ///
-    /// - Returns: A saved playlist and the number of failed track-imports, or `nil` if the given data is an invalid playlist
+    /// - Returns: The saved playlist and the number of entries that this function could not import, or `nil` when `data` is not a correct playlist
     func importPlaylist(fromM3U8 data: Data, suggestedName: String, matchingAgainst knownReferences: [String: MediaReference]) -> (SavedPlaylist, failedTrackImportCount: Int)? {
         guard let text = String(data: data, encoding: .utf8) else {
             log(error: "That M3U8 file isn't UTF-8 text, so I can't read it")
@@ -189,11 +198,15 @@ public extension PlaylistLibraryStore {
     }
     
     
-    /// Groups freshly-imported entries into album playlists, by their album metadata.
+    /// Makes album playlists from entries that the user imported, with the album metadata of each file.
     ///
-    /// Files sharing an album name — two or more of them, so a lone single isn't an "album" — become a `SavedPlaylist` of kind `.album` named after it, or merge into the existing one. Awaits each file's metadata search, so call this *after* the entries are already appended and playing; grouping is a quiet background courtesy, never a gate.
+    /// When 2 or more files have the same album name, they become a `SavedPlaylist` with `kind` set to `.album`, and with that album name. When the library has an album playlist with that name, the files go into it. A single file does not make an album.
     ///
-    /// Merging dedups by filename (bookmark data isn't byte-stable for the same file, so it can't be the identity here) — re-importing an album doesn't double its tracks. Track order is import order for now; sorting by track-number metadata is a future refinement.
+    /// This function waits for the metadata search of each file. Thus, call it after the entries are in the queue and playback started. Playback must not wait for this function.
+    ///
+    /// When files go into an album playlist that the library has, this function compares filenames to find duplicates. It does not compare bookmark data, because the bookmark data of 1 file can change. Thus an import of the same album again does not add its tracks 2 times. The tracks keep the sequence of the import. A possible future change: sort the tracks by track number.
+    ///
+    /// - Parameter entries: The entries that the user imported
     func autoGroupAlbums(from entries: [PlaylistEntry]) async {
         var albumNamesInImportOrder: [String] = []
         var referencesByAlbum: [String: [MediaReference]] = [:]
