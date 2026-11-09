@@ -63,7 +63,9 @@ public final class PlaybackEngine {
     /// This value stays `true` until the engine finds that the item has no video. Thus cover art cannot show on top of the first frames of a video.
     public private(set) var hasVideoTrack = true
     
-    /// Bumped every time the current item's metadata resolves another field
+    /// Increases by 1 each time `AsyncMetadata` completes the search for a metadata key of the current item (for example, the title). A search completes when it finds the value, and also when it gives an error.
+    ///
+    /// `metadata(_:)` reads this value. Thus each SwiftUI `body` that calls `metadata(_:)` runs again when a search completes. Observation does not track the searches of `AsyncMetadata` directly.
     private var metadataRevision: UInt = 0
     
     
@@ -278,7 +280,7 @@ public extension PlaybackEngine {
                 updateNowPlayingPlaybackPosition()
             }
         
-        // Each resolved metadata field refreshes both what views can read and what the system shows
+        // Each completed search for a metadata key refreshes both what views can read and what the system shows
         metadataSink = item.metadata?.onMetadataDidUpdate()
             .sink { [weak self] in
                 guard let self else { return }

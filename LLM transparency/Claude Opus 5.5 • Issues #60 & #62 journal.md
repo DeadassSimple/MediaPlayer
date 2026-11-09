@@ -115,3 +115,20 @@ I moved the body of `installPeriodicTimeObserver()` into `init`, with no change 
 On the `PlaybackEngine.swift:27` thread, Ky thought that the event stream lets only 1 listener read the events. The code in `38f253a` is multicast: each call to `events()` makes a new stream, and `send(_:)` gives each event to each stream. My previous reply in that thread started with the limit of 1 `AsyncStream` (unicast), and told how the engine operates only in the last sentence. That structure caused the error. I told Ky this, and I made no change to the code, because Ky told me to answer before I make changes.
 
 Ky also told me that the built app has `UIApplicationSupportsMultipleScenes` set to `false`, and that the project uses Swift 6.4. Thus `isolated deinit` is available. I did not compile this change.
+
+## 2026-11-09 — the doc comment of `metadataRevision`
+
+**Model:** Claude Opus 5.5
+**Director:** Ky
+
+The `//` comment on the `access(keyPath: \.metadataRevision)` line in `metadata(_:)` says "see the property's doc". The doc comment of `metadataRevision` did not give the cause for that call. Claude Fable 5.1 wrote these lines in `5de0901`. In the PR checklist, I first said that Ky wrote them in `69f8161`. That was not correct. `69f8161` was only the last commit that changed them.
+
+I used the last commit as the author, and I did not examine the history. I corrected the checklist.
+
+My first new doc comment said "when a field becomes available". Ky found that this has no meaning, because a field (a stored property) is always available. The correct term is a metadata key.
+
+In `AsyncMetadata.swift`, I found that `AsyncMetadata` sends 1 update each time the search for 1 key completes, with a value or with an error. The engine increases `metadataRevision` for each update. The new doc comment says this. The `//` comment on `metadataSink` had the same error ("Each resolved metadata field"). The new `//` comment says "key".
+
+Checklist item 4 (Play at the end of an item) is closed with no change. Ky's device log showed that Play in Control Center calls `playOrRestart()` and starts the item again. Play in the app is part of the `AVPlayerViewController` transport controls, which start the `AVPlayer` directly. Ky accepted this, because custom transport controls will replace the system controls in the near future.
+
+The log also showed that the actual end of the audio was 0.2 seconds after the `duration` that `AVPlayerItem` reported. Apple documents `AVAsset.duration` as an estimate unless the asset uses `AVURLAssetPreferPreciseDurationAndTimingKey`.
