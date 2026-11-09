@@ -334,7 +334,7 @@ public extension PlaybackEngine {
     ///
     /// This method has no effect when no item is loaded.
     func play() {
-        player.playFromStartIfFinished()
+        player.playOrRestart()
     }
     
     
@@ -347,7 +347,7 @@ public extension PlaybackEngine {
     /// Pauses playback if the item plays, and starts playback if the item is paused. Headphone buttons and many car controls send this command.
     func togglePlayPause() {
         if player.isPaused {
-            player.playFromStartIfFinished()
+            player.playOrRestart()
         }
         else {
             player.pause()
@@ -511,7 +511,7 @@ private extension PlaybackEngine {
         // Add handler for Play Command
         commandCenter.playCommand.addTarget { [player] _ in
             guard player.isPaused else { return .commandFailed }
-            player.playFromStartIfFinished()
+            player.playOrRestart()
             return .success
         }
         
@@ -525,7 +525,7 @@ private extension PlaybackEngine {
         // Add handler for Toggle Play/Pause Command, which is what headphone buttons and many car head units send instead of the discrete commands above
         commandCenter.togglePlayPauseCommand.addTarget { [player] _ in
             if player.isPaused {
-                player.playFromStartIfFinished()
+                player.playOrRestart()
             }
             else {
                 player.pause()

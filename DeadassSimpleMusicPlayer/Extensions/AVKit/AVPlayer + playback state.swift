@@ -42,7 +42,7 @@ extension AVPlayer {
     /// Starts playback. If the playhead is at the end of the current item, this function first moves the playhead to the start of the item.
     ///
     /// Use this function, not `play()`, for each play command from the user. `play()` does not start an item again after the item played to its end. Thus, at the end of an item, `play()` does nothing. This function starts the item again, as the playback controls of the system do.
-    func playFromStartIfFinished() {
+    func playOrRestart() {
         if isAtEndOfCurrentItem {
             seek(to: .zero)
         }
