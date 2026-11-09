@@ -96,3 +96,22 @@ The rebase had 2 conflicts. The 2 conflicts are in `PlaybackEngine.swift`, on li
 - The `//` comment on the `access(keyPath:)` call continues to say "see the property's doc". The doc of the property does not give the cause for the call at this time. I did not change this, because Ky wrote these 2 lines in the commit that I rebased on. I told Ky about it.
 
 The new rule in `AGENTS.md` says that 100% of a journal must be in standard technical English. My first 2 entries were not. The STE checker found many words that are not in the STE dictionary. I wrote the 2 entries again in ASD-STE100, and examined them with the checker. The facts in them did not change. This entry is also in ASD-STE100.
+
+## 2026-11-08 — move the periodic time observer into `init`
+
+**Model:** Claude Opus 5.5
+**Director:** Ky
+
+Ky applied the patch as `38f253a`. Then Ky replied on the line 427 thread. On the line 349 thread, Ky said "move this addPeriodicTimeObserver to init". I read that as "call it from `init`". The engine did that before my patch, thus my patch added only the `isolated deinit`.
+
+Ky meant something different: put the code of `installPeriodicTimeObserver()` in `init`, and remove the function. The engine must add this observer only 1 time. When no function contains the code, no other code can call it again by mistake.
+
+I moved the body of `installPeriodicTimeObserver()` into `init`, with no change to the code, and I removed the function. Its doc comment became a `//` comment in `init`, because a doc comment cannot be on a statement.
+
+`periodicTimeObserverToken` continues to be an optional `var`. It cannot be a `let`, because the observer closure captures `self` weakly. Swift does not let `init` use `self` until all stored properties have a value. Thus the token cannot get its value during that first phase of `init`.
+
+`installRateObserver()` and `installInterruptionObserver()` also have only 1 call, from `init`. The same cause can apply to them. Ky did not tell me to change them, thus I did not change them. I told Ky about them.
+
+On the `PlaybackEngine.swift:27` thread, Ky thought that the event stream lets only 1 listener read the events. The code in `38f253a` is multicast: each call to `events()` makes a new stream, and `send(_:)` gives each event to each stream. My previous reply in that thread started with the limit of 1 `AsyncStream` (unicast), and told how the engine operates only in the last sentence. That structure caused the error. I told Ky this, and I made no change to the code, because Ky told me to answer before I make changes.
+
+Ky also told me that the built app has `UIApplicationSupportsMultipleScenes` set to `false`, and that the project uses Swift 6.4. Thus `isolated deinit` is available. I did not compile this change.

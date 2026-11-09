@@ -118,7 +118,23 @@ public final class PlaybackEngine {
     /// The engine connects to the remote commands when it first loads an item. Thus you can make an engine that you do not use, and that engine does not change the remote commands.
     public init() {
         installRateObserver()
-        installPeriodicTimeObserver()
+        
+        // Keeps `currentTime` correct, and sends `Event.positionChanged(item:seconds:)` for the loaded item. This is here, not in a function, so that nothing else can add a second observer. `deinit` removes this one
+        periodicTimeObserverToken = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: .commonMedia),
+            queue: .main
+        ) { [weak self] time in
+            guard let self else { return }
+            
+            MainActor.assumeIsolated {
+                self.currentTime = time.seconds
+                
+                if let currentItem = self.currentItem {
+                    self.send(.positionChanged(item: currentItem, seconds: time.seconds))
+                }
+            }
+        }
+        
         installInterruptionObserver()
         
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
@@ -419,25 +435,6 @@ private extension PlaybackEngine {
                 updateNowPlayingPlaybackPosition()
             }
             .store(in: &sinks)
-    }
-    
-    
-    /// Keeps `currentTime` correct, and sends `Event.positionChanged(item:seconds:)` for the loaded item
-    func installPeriodicTimeObserver() {
-        periodicTimeObserverToken = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.5, preferredTimescale: .commonMedia),
-            queue: .main
-        ) { [weak self] time in
-            guard let self else { return }
-            
-            MainActor.assumeIsolated {
-                self.currentTime = time.seconds
-                
-                if let currentItem = self.currentItem {
-                    self.send(.positionChanged(item: currentItem, seconds: time.seconds))
-                }
-            }
-        }
     }
     
     
