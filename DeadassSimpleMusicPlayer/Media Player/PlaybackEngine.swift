@@ -179,6 +179,7 @@ public extension PlaybackEngine {
     }
     
     
+    
     /// Returns a new stream of the events that occur after this call.
     ///
     /// Each call returns a different stream, and each stream gets all of the events. Thus more than 1 listener can read the events at the same time. To stop a stream, cancel the task that reads it. The stream ends when the engine is released.
