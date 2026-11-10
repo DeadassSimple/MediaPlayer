@@ -46,39 +46,24 @@ private struct PlayerControls: View {
             VStack {
                 Spacer(minLength: minCornerRadius).fixedSize()
                 
-                Rectangle()
-                    .fill(.accent)
-                    .frame(height: 5)
+                scrubBar
             }
             .padding(12)
             
-            Spacer(minLength: 0)//.fixedSize()
+            Spacer(minLength: 0)
             transportButtons
-            Spacer(minLength: 0)//.fixedSize()
+            Spacer(minLength: 0)
         }
+        .foregroundStyle(Color.accentColor)
         .ignoresSafeArea(.container, edges: ignoredSafeAreaEdges)
-//        .frame(height: 180)
-//        .border(.red)
         .background {
             ConcentricRectangle(corners: .concentric(minimum: .fixed(minCornerRadius)))
                 .fill(.background)
                 .fill(.accent.opacity(0.1))
-            //        .fill(.accent.opacity(0.03))
-            //        .elevation(.z24)
                 .materialShadow(.z24)
         }
         .padding(inset)
         
-//        .onGeometryChange(for: RectangleCornerRadii.self) { geometry in
-//            if #available(anyAppleOS 27.0, *) {
-//                geometry.concentricCornerRadii ?? .zero
-//            } else {
-//                Introspection.Device.current.dimensions.displayCornerRadii
-//            }
-//        }
-//        action: { newValue in
-//            screenCornerRadii = newValue
-//        }
         .ignoresSafeArea(.container, edges: ignoredSafeAreaEdges)
     }
     
@@ -99,6 +84,21 @@ private struct PlayerControls: View {
 }
 
 
+
+// MARK: - Scrub bar
+
+private extension PlayerControls {
+    var scrubBar: some View {
+        
+        Rectangle()
+            .fill(.accent)
+            .frame(height: 4 * 3)
+    }
+}
+
+
+
+// MARK: - Transport controls
 
 private extension PlayerControls {
     var transportButtons: some View {
