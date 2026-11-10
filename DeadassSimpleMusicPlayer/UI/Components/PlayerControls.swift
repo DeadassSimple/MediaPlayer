@@ -299,8 +299,17 @@ private extension ImageResource {
 // MARK: - Supporting types
 
 public struct PlayerControlsConfiguration: Sendable {
+    
+    /// How many times per second the player controls should be expected to update to reflect the player
+    public var updateFrequency: TimeInterval
+    
+    /// `true` iff the current media is currently playing
     public var isPlaying: Bool = false
+    
+    /// How much of the current media has been played
     public var currentTrackPosition: PlayheadPosition?
+    
+    /// What kind of back/forward buttons the controls should use
     public var backForwardKind: BackForwardKind = .skipTrack
     
     

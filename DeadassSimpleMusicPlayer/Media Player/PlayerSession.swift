@@ -313,7 +313,6 @@ private extension PlayerSession {
 
 
 
-// In the UI layer on purpose: `PlayerAction` is a type of the UI, and the model layer must not depend on it
 public extension PlayerSession {
     
     /// Changes playback for 1 action that the user did in the player controls.
