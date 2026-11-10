@@ -13,6 +13,14 @@ import SimpleLogging
 
 
 
+/// How long to let a track play before the "previous track" button becomes a "restart this track" button.
+///
+/// When playing a track, tapping the ⏮️ button returns the playhead to the start of the track. Tapping it again brings it to the start of the previous track.
+/// This value tells the player how far into the track one must be for that to be the behavior. Before this number of seconds, it skips to the previous track. After this number of seconds, it returns to the start of this track.
+private let skipBackThreshold: TimeInterval = 1.5
+
+
+
 /// Connects the playback engine with the queue, the history and the saved playlists. To play media, a view must have only this object.
 ///
 /// Make 1 session, and keep it for the life of the app. Give it to `CustomMediaPlayer` to show its media. To use 1 part directly, use these properties:
@@ -322,7 +330,12 @@ public extension PlayerSession {
             engine.pause()
             
         case .previousTrack:
-            nowPlaying.skipToPreviousEntry()
+            if engine.currentTime < skipBackThreshold {
+                nowPlaying.skipToPreviousEntry()
+            }
+            else {
+                engine.seek(to: .zero)
+            }
             
         case .nextTrack:
             nowPlaying.skipToNextEntry()
