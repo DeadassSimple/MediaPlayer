@@ -73,6 +73,7 @@ private struct PlayerControls: View {
         .padding(inset)
         
         .ignoresSafeArea(.container, edges: ignoredSafeAreaEdges)
+        .disabled(nil == configuration.currentTrackPosition)
     }
     
     
@@ -112,8 +113,10 @@ private extension PlayerControls {
                     .contentTransition(.numericText())
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.2),
                                value: configuration.currentTrackPosition?.current)
+                    .transition(.opacity.animation(.smooth))
                 Spacer()
                 Text(currentTrackTotalTimestamp).multilineTextAlignment(.trailing)
+                    .transition(.opacity.animation(.smooth))
             }
             .font(.system(size: 24, weight: .black, design: .rounded))
             .opacity(nil == configuration.currentTrackPosition ? 0 : 1)
@@ -169,14 +172,17 @@ private extension PlayerControls {
     var transportButtons: some View {
         HStack {
             backButton
+                .transition(.opacity.animation(.smooth))
             
             Spacer(minLength: 32).fixedSize()
             
             playPauseButton
+                .transition(.opacity.animation(.smooth))
             
             Spacer(minLength: 32).fixedSize()
             
             forwardButton
+                .transition(.opacity.animation(.smooth))
         }
         .disabled(disabled)
     }
@@ -201,7 +207,9 @@ private extension PlayerControls {
             skipBackButton(increment: increment)
             
         case nil:
-            EmptyView()
+            previousTrackButton
+                .disabled(true)
+                .opacity(0)
         }
     }
     
@@ -216,7 +224,9 @@ private extension PlayerControls {
             skipForwardButton(increment: increment)
             
         case nil:
-            EmptyView()
+            nextTrackButton
+                .disabled(true)
+                .opacity(0)
         }
     }
     
@@ -254,12 +264,8 @@ private extension PlayerControls {
         imageName: ImageResource,
         size: CGFloat = buttonSize_regular,
     ) -> some View {
-        Button {
+        CustomIconButton(icon: imageName, iconSize: .square(size)) {
             performUserAction(action)
-        } label: {
-            Image(imageName)
-                .resizable()
-                .frame(width: size, height: size)
         }
     }
     
