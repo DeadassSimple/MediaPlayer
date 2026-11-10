@@ -102,6 +102,7 @@ private extension ContentView {
     /// What the player controls show. This value shows the state of the engine of `session`. Thus the controls agree with the player also when the change comes from outside the app, for example a pause from Control Center.
     var controlsConfiguration: PlayerControlsConfiguration {
         PlayerControlsConfiguration(
+            updateFrequency: session.engine.updateFrequency,
             isPlaying: session.engine.isPlaying,
             currentTrackPosition: session.engine.currentTrackPosition,
             backForwardKind: .skipTrack)

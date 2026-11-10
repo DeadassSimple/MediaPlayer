@@ -10,7 +10,7 @@ import Foundation
 
 
 /// Describes the position of a playhead in the context of a single media file
-public struct PlayheadPosition: Sendable {
+public struct PlayheadPosition: Sendable, Equatable {
     public let current: Duration
     public let total: Duration
 }

@@ -37,6 +37,9 @@ private struct PlayerControls: View {
     @Environment(\.layoutDirection)
     private var layoutDirection
     
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
+    
     @State
     private var disabled: Bool = false
     
@@ -102,9 +105,13 @@ private extension PlayerControls {
                 scrubBarForeground
             }
             .frame(height: 4 * 3)
+            .animation(.linear(duration: configuration.updateFrequency), value: configuration)
             
             HStack {
                 Text(currentTrackTimestamp).multilineTextAlignment(.leading)
+                    .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2),
+                               value: configuration.currentTrackPosition?.current)
                 Spacer()
                 Text(currentTrackTotalTimestamp).multilineTextAlignment(.trailing)
             }
@@ -134,7 +141,9 @@ private extension PlayerControls {
 
 private extension PlayerControls {
     var currentTrackPercent: CGFloat {
-        guard let currentTrackPosition = configuration.currentTrackPosition else {
+        guard let currentTrackPosition = configuration.currentTrackPosition,
+              currentTrackPosition.total > .zero
+        else {
             return 0
         }
         
@@ -298,7 +307,8 @@ private extension ImageResource {
 
 // MARK: - Supporting types
 
-public struct PlayerControlsConfiguration: Sendable {
+/// Describes the current state of player controls
+public struct PlayerControlsConfiguration: Sendable, Equatable {
     
     /// How many times per second the player controls should be expected to update to reflect the player
     public var updateFrequency: TimeInterval
@@ -315,7 +325,7 @@ public struct PlayerControlsConfiguration: Sendable {
     
     
     /// What kind of back/forward buttons should be in the player controls?
-    public enum BackForwardKind: Sendable {
+    public enum BackForwardKind: Sendable, Equatable {
         
         /// Skip back/forward by a certain duration
         case skipTime(forwardIncrement: SkipIncrement, backwardIncrement: SkipIncrement)
@@ -404,6 +414,7 @@ private let __preview_trackPosition_late = PlayheadPosition(current: .seconds((3
 #Preview("Paused music") {
     Rectangle().fill(.background)
         .playerControls(configuration: .init(
+            updateFrequency: 0,
             isPlaying: false,
             currentTrackPosition: nil,
             backForwardKind: .skipTrack,
@@ -414,6 +425,7 @@ private let __preview_trackPosition_late = PlayheadPosition(current: .seconds((3
 #Preview("Playing podcast") {
     Rectangle().fill(.background)
         .playerControls(configuration: .init(
+            updateFrequency: 0,
             isPlaying: true,
             currentTrackPosition: __preview_trackPosition_late,
             backForwardKind: .skipTime(forwardIncrement: .seconds(15), backwardIncrement: .seconds(15)),

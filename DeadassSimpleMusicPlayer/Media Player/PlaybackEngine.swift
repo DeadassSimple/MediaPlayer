@@ -55,6 +55,9 @@ public final class PlaybackEngine {
     /// The duration of the loaded item, in seconds. `nil` while the duration is not known, and when no item is loaded.
     public private(set) var duration: TimeInterval? = nil
     
+    /// How frequently the engine should check for and report updates to the currently-playing item
+    public let updateFrequency: TimeInterval = 0.1
+    
     /// The cover art to show in the video area. `nil` when the loaded item has video, and when no item is loaded.
     public private(set) var artwork: NativeImage? = nil
     
@@ -123,7 +126,7 @@ public final class PlaybackEngine {
         
         // Keeps `currentTime` correct, and sends `Event.positionChanged(item:seconds:)` for the loaded item. This is here, not in a function, so that nothing else can add a second observer. `deinit` removes this one
         periodicTimeObserverToken = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.5, preferredTimescale: .commonMedia),
+            forInterval: CMTime(seconds: updateFrequency, preferredTimescale: .commonMedia),
             queue: .main
         ) { [weak self] time in
             guard let self else { return }
