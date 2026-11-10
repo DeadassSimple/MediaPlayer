@@ -35,7 +35,6 @@ struct ConfirmationGatedButton: View {
         self.confirmationMessage = confirmationMessage
         self.confirmationButtonTitle = confirmationButtonTitle ?? title
         self.action = action
-        self.isConfirming = isConfirming
     }
     
     

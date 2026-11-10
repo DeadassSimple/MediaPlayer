@@ -34,6 +34,9 @@ private struct PlayerControls: View {
     @Environment(\.horizontalSizeClass)
     private var horizontalSizeClass
     
+    @Environment(\.layoutDirection)
+    private var layoutDirection
+    
     @State
     private var disabled: Bool = false
     
@@ -55,7 +58,9 @@ private struct PlayerControls: View {
             Spacer(minLength: 0)
         }
         .foregroundStyle(Color.accentColor)
+        .flipsForRightToLeftLayoutDirection(false)
         .ignoresSafeArea(.container, edges: ignoredSafeAreaEdges)
+        
         .background {
             ConcentricRectangle(corners: .concentric(minimum: .fixed(minCornerRadius)))
                 .fill(.background)
@@ -88,11 +93,62 @@ private struct PlayerControls: View {
 // MARK: - Scrub bar
 
 private extension PlayerControls {
+    
     var scrubBar: some View {
-        
+        VStack(spacing: 0) {
+            ZStack(alignment: .left(in: layoutDirection)) {
+                scrubBarBackground
+                
+                scrubBarForeground
+            }
+            .frame(height: 4 * 3)
+            
+            HStack {
+                Text(currentTrackTimestamp).multilineTextAlignment(.leading)
+                Spacer()
+                Text(currentTrackTotalTimestamp).multilineTextAlignment(.trailing)
+            }
+            .font(.system(size: 24, weight: .black, design: .rounded))
+            .opacity(nil == configuration.currentTrackPosition ? 0 : 1)
+        }
+    }
+    
+    
+    private var scrubBarForeground: some View {
         Rectangle()
             .fill(.accent)
-            .frame(height: 4 * 3)
+//            .containerRelativeFrame(.horizontal, alignment: .left(in: layoutDirection)) { length, _ in
+//                length * currentTrackPercent
+//            }
+            .relativeProposed(width: currentTrackPercent)
+    }
+    
+    
+    private var scrubBarBackground: some View {
+        Rectangle()
+            .fill(Color.accentColor.opacity(0.2))
+    }
+}
+
+
+
+private extension PlayerControls {
+    var currentTrackPercent: CGFloat {
+        guard let currentTrackPosition = configuration.currentTrackPosition else {
+            return 0
+        }
+        
+        return currentTrackPosition.current / currentTrackPosition.total
+    }
+    
+    
+    var currentTrackTimestamp: String {
+        configuration.currentTrackPosition?.current.mediaPositionTimestamp ?? ""
+    }
+    
+    
+    var currentTrackTotalTimestamp: String {
+        configuration.currentTrackPosition?.total.mediaPositionTimestamp ?? "🫪"
     }
 }
 
@@ -244,6 +300,7 @@ private extension ImageResource {
 
 public struct PlayerControlsConfiguration: Sendable {
     public var isPlaying: Bool = false
+    public var currentTrackPosition: PlayheadPosition?
     public var backForwardKind: BackForwardKind = .skipTrack
     
     
@@ -330,13 +387,26 @@ public extension View {
 
 
 
+private let __preview_trackPosition_early = PlayheadPosition(current: .seconds(4), total: .seconds((3 * 60) + 45))
+private let __preview_trackPosition_late = PlayheadPosition(current: .seconds((3 * 60) + 43), total: .seconds((3 * 60) + 45))
+
+
+
 #Preview("Paused music") {
     Rectangle().fill(.background)
-        .playerControls(configuration: .init(isPlaying: false, backForwardKind: .skipTrack), onUserAction: null)
+        .playerControls(configuration: .init(
+            isPlaying: false,
+            currentTrackPosition: nil,
+            backForwardKind: .skipTrack,
+        ), onUserAction: null)
 }
 
 
 #Preview("Playing podcast") {
     Rectangle().fill(.background)
-        .playerControls(configuration: .init(isPlaying: true, backForwardKind: .skipTime(forwardIncrement: .seconds(15), backwardIncrement: .seconds(15))), onUserAction: null)
+        .playerControls(configuration: .init(
+            isPlaying: true,
+            currentTrackPosition: __preview_trackPosition_late,
+            backForwardKind: .skipTime(forwardIncrement: .seconds(15), backwardIncrement: .seconds(15)),
+        ), onUserAction: null)
 }

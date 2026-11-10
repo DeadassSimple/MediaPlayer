@@ -624,6 +624,17 @@ private extension PlaybackEngine {
 
 
 
+// MARK: - Conveniences
+
+public extension PlaybackEngine {
+    var currentTrackPosition: PlayheadPosition? {
+        guard let duration else { return nil }
+        return PlayheadPosition(current: currentTime, total: duration)
+    }
+}
+
+
+
 // MARK: - Constants
 
 private extension CMTimeScale {
