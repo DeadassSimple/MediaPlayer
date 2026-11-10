@@ -16,6 +16,9 @@ private let inset: CGFloat = 4
 private let minCornerRadius: CGFloat = 24
 private let ignoredSafeAreaEdges: Edge.Set = .bottom
 
+private let buttonSize_large: CGFloat = 78
+private let buttonSize_regular: CGFloat = 72
+
 
 
 /// This view contains configurable controls for a media player, designed to appear in the same location on-screen at all times.
@@ -100,26 +103,139 @@ private struct PlayerControls: View {
 private extension PlayerControls {
     var transportButtons: some View {
         HStack {
-            Spacer()
+            backButton
+            
+            Spacer(minLength: 32).fixedSize()
             
             playPauseButton
             
-            Spacer()
+            Spacer(minLength: 32).fixedSize()
+            
+            forwardButton
         }
         .disabled(disabled)
     }
     
     
     var playPauseButton: some View {
-        Button(action: {
-            performUserAction(configuration.isPlaying ? .pause : .play)
-        }) {
-            Image(configuration.isPlaying ? .TransportControls.pause : .TransportControls.play)
-                .resizable()
-                .frame(width: 78, height: 78)
+        transportButton(
+            action: configuration.isPlaying ? .pause : .play,
+            imageName: configuration.isPlaying ? .TransportControls.pause : .TransportControls.play,
+            size: buttonSize_large
+        )
+    }
+    
+    
+    @ViewBuilder
+    var backButton: some View {
+        switch configuration.backForwardKind {
+        case .skipTrack:
+            previousTrackButton
+            
+        case .skipTime(forwardIncrement: _, backwardIncrement: let increment):
+            skipBackButton(increment: increment)
         }
     }
+    
+    
+    @ViewBuilder
+    var forwardButton: some View {
+        switch configuration.backForwardKind {
+        case .skipTrack:
+            nextTrackButton
+            
+        case .skipTime(forwardIncrement: _, backwardIncrement: let increment):
+            skipForwardButton(increment: increment)
+        }
+    }
+    
+    
+    var previousTrackButton: some View {
+        transportButton(action: .previousTrack, imageName: .TransportControls.previousTrack)
+    }
+    
+    
+    var nextTrackButton: some View {
+        transportButton(action: .nextTrack, imageName: .TransportControls.nextTrack)
+    }
+    
+    
+    func skipBackButton(increment: PlayerAction.SkipIncrement) -> some View {
+        transportButton(
+            action: .skipBackward(increment: increment),
+            imageName: .TransportControls.skipBack,
+            overlayText: increment.overlayText
+        )
+    }
+    
+    
+    func skipForwardButton(increment: PlayerAction.SkipIncrement) -> some View {
+        transportButton(
+            action: .skipForward(increment: increment),
+            imageName: .TransportControls.skipForward,
+            overlayText: increment.overlayText
+        )
+    }
+    
+    
+    private func transportButton(
+        action: PlayerAction,
+        imageName: ImageResource,
+        size: CGFloat = buttonSize_regular,
+    ) -> some View {
+        Button {
+            performUserAction(action)
+        } label: {
+            Image(imageName)
+                .resizable()
+                .frame(width: size, height: size)
+        }
+    }
+    
+    
+    private func transportButton(
+        action: PlayerAction,
+        imageName: ImageResource,
+        size: CGFloat = buttonSize_regular,
+        overlayText: LocalizedStringKey,
+    ) -> some View {
+        ZStack {
+            transportButton(
+                action: action,
+                imageName: imageName,
+                size: size,
+            )
+            
+            Text(overlayText)
+                .font(.system(size: size/3, weight: .black, design: .rounded))
+                .foregroundStyle(.brand)
+                .multilineTextAlignment(.center)
+                .padding(.top, imageName.verticalPixelOffsetForCenteredText * 3)
+        }
+    }
+}
 
+
+
+private extension Duration {
+    var overlayText: LocalizedStringKey {
+        "\(UInt(abs(timeInterval.rounded())))"
+    }
+}
+
+
+
+private extension ImageResource {
+    var verticalPixelOffsetForCenteredText: CGFloat {
+        switch self {
+        case .TransportControls.skipBack,
+                .TransportControls.skipForward:
+            return 2
+            
+        default:
+            return 0
+        }
+    }
 }
 
 
@@ -214,7 +330,13 @@ public extension View {
 
 
 
-#Preview {
+#Preview("Paused music") {
     Rectangle().fill(.background)
         .playerControls(configuration: .init(isPlaying: false, backForwardKind: .skipTrack), onUserAction: null)
+}
+
+
+#Preview("Playing podcast") {
+    Rectangle().fill(.background)
+        .playerControls(configuration: .init(isPlaying: true, backForwardKind: .skipTime(forwardIncrement: .seconds(15), backwardIncrement: .seconds(15))), onUserAction: null)
 }
