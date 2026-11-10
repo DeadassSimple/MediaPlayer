@@ -199,6 +199,9 @@ private extension PlayerControls {
             
         case .skipTime(forwardIncrement: _, backwardIncrement: let increment):
             skipBackButton(increment: increment)
+            
+        case nil:
+            EmptyView()
         }
     }
     
@@ -211,6 +214,9 @@ private extension PlayerControls {
             
         case .skipTime(forwardIncrement: _, backwardIncrement: let increment):
             skipForwardButton(increment: increment)
+            
+        case nil:
+            EmptyView()
         }
     }
     
@@ -319,8 +325,8 @@ public struct PlayerControlsConfiguration: Sendable, Equatable {
     /// How much of the current media has been played
     public var currentTrackPosition: PlayheadPosition?
     
-    /// What kind of back/forward buttons the controls should use
-    public var backForwardKind: BackForwardKind = .skipTrack
+    /// What kind of back/forward buttons the controls should use. `nil` hides the back/forward buttons
+    public var backForwardKind: BackForwardKind? = .skipTrack
     
     
     
