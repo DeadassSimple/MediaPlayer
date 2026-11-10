@@ -12,7 +12,7 @@ import CrossKitTypes
 
 
 
-/// A UIKit/SwiftUI translation layer between ``AVPlayer`` and ``MediaPlayerView``
+/// A UIKit/SwiftUI translation layer between ``AVPlayer`` and ``CustomMediaPlayer``
 struct Player: UIViewControllerRepresentable {
     
     /// The player to shim into this UI layer

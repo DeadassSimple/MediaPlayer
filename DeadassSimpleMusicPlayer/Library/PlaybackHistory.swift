@@ -17,8 +17,12 @@ public struct PlaybackHistory: Codable, Sendable {
     /// What's been played, newest first
     public private(set) var entries: [Entry]
     
-    /// How much history to keep. Applied automatically on every ``record(_:displayName:at:)``; apply manually (via ``applyRetention(asOf:)``) after changing this.
-    public var retention: Retention
+    /// How much history to keep. Each change removes the entries that the new value does not keep, and each `record(_:displayName:at:)` applies it again.
+    public var retention: Retention {
+        didSet {
+            applyRetention()
+        }
+    }
     
     
     public init(entries: [Entry] = [], retention: Retention = .forever) {
@@ -90,7 +94,7 @@ public extension PlaybackHistory {
     }
     
     
-    /// Discards whatever ``retention`` says to discard. Called automatically on every recording; call directly after the user tightens the retention setting.
+    /// Removes the entries that `retention` does not keep. Each call to `record(_:displayName:at:)` and each change to `retention` calls this function. Call it directly when time went by with no call to `record(_:displayName:at:)`, for example after the app was closed.
     mutating func applyRetention(asOf date: Date = .init()) {
         switch retention {
         case .forever:
