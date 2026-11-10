@@ -7,6 +7,7 @@
 
 import SwiftUI
 
+import BasicMathTools
 import SimpleLogging
 
 
@@ -26,27 +27,12 @@ struct ContentView: View {
     @State
     private var session = PlayerSession()
     
-    @State
-    private var controlsConfiguration = PlayerControlsConfiguration()
-                                                                           
-    
-    
     var body: some View {
         NavigationStack {
             CustomMediaPlayer(session: session)
             
-                .playerControls(configuration: controlsConfiguration) { action in
-                    switch action {
-                    case .play:
-                        print("TODO: Play the player")
-                        controlsConfiguration.isPlaying = true
-                        
-                    case .pause:
-                        print("TODO: Pause the player")
-                        controlsConfiguration.isPlaying = false
-                        
-                    default: fatalError("TODO")
-                    }
+                .playerControls(configuration: controlsConfiguration) { [session] action in
+                    await session.perform(action)
                 }
             
                 .toolbar {
@@ -104,6 +90,73 @@ struct ContentView: View {
                 session.nowPlaying.saveSnapshotNow()
             }
         }
+    }
+}
+
+
+
+// MARK: - Player controls
+
+private extension ContentView {
+    
+    /// What the player controls show. This value shows the state of the engine of `session`. Thus the controls agree with the player also when the change comes from outside the app, for example a pause from Control Center.
+    var controlsConfiguration: PlayerControlsConfiguration {
+        PlayerControlsConfiguration(isPlaying: session.engine.isPlaying)
+    }
+}
+
+
+
+// In the UI layer on purpose: `PlayerAction` is a type of the UI, and the model layer must not depend on it
+private extension PlayerSession {
+    
+    /// Changes playback for 1 action that the user did in the player controls.
+    ///
+    /// Call this function from the `onUserAction` closure of `playerControls(configuration:onUserAction:)`.
+    ///
+    /// - Parameter action: The action that the user did
+    func perform(_ action: PlayerAction) {
+        switch action {
+        case .play:
+            engine.play()
+            
+        case .pause:
+            engine.pause()
+            
+        case .previousTrack:
+            nowPlaying.skipToPreviousEntry()
+            
+        case .nextTrack:
+            nowPlaying.skipToNextEntry()
+            
+        case .skipBackward(increment: let increment):
+            // `currentTime` can be up to 1 interval of the periodic time observer behind the player during playback
+            seekWithinCurrentItem(to: engine.currentTime - (increment / .seconds(1)))
+            
+        case .skipForward(increment: let increment):
+            seekWithinCurrentItem(to: engine.currentTime + (increment / .seconds(1)))
+            
+        case .reverse(transaction: let transaction),
+            .fastForward(transaction: let transaction),
+            .scrub(transaction: let transaction):
+            // A `TransportTransaction` has positions and no rate, so the controls calculate the position, and `perform(_:)` only moves the playhead to that position
+            seekWithinCurrentItem(to: transaction.currentPosition / .seconds(1))
+        }
+    }
+    
+    
+    /// Moves the playhead of the engine to `seconds`, but not before the start of the loaded item, and not after its end.
+    ///
+    /// When the duration of the item is not known, the start of the item is the only limit.
+    ///
+    /// - Parameter seconds: The new position, in seconds from the start of the loaded item
+    func seekWithinCurrentItem(to seconds: TimeInterval) {
+        guard seconds.isFinite else {
+            log(error: "Ignored a seek to a position which is not a finite number: \(seconds)")
+            return
+        }
+        
+        engine.seek(to: seconds.clamped(within: 0 ... (engine.duration ?? .infinity)))
     }
 }
 
