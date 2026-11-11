@@ -43,9 +43,16 @@ private struct PlayerControls: View {
     @State
     private var disabled: Bool = false
     
-    
     @State
     private var screenCornerRadii: RectangleCornerRadii = Introspection.Device.current.dimensions.displayCornerRadii
+    
+    @State
+    private var scrubBarWidth: CGFloat = 0
+    
+    
+    @GestureState
+    private var scrubPreviewPosition: Duration? = nil
+    
     
     var body: some View {
         VStack {
@@ -79,10 +86,10 @@ private struct PlayerControls: View {
     
     
     private func performUserAction(_ action: PlayerAction) {
-        Task {
-            disabled = true
+        Task { @UserActionQueue in
+            await MainActor.run { disabled = true }
+            defer { await MainActor.run { disabled = false } }
             await onUserAction(action)
-            disabled = false
         }
     }
     
@@ -90,6 +97,14 @@ private struct PlayerControls: View {
     
     typealias Configuration = PlayerControlsConfiguration
     typealias OnUserAction = PlayerAction.OnUserAction
+}
+
+
+
+@globalActor
+final actor UserActionQueue: GlobalActor {
+    public static let shared = ActorType()
+    public typealias ActorType = UserActionQueue
 }
 
 
@@ -107,7 +122,9 @@ private extension PlayerControls {
             }
             .frame(height: 4 * 3)
             .animation(.linear(duration: configuration.updateFrequency), value: configuration)
-            
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { scrubBarWidth = $0 }
+
+
             HStack {
                 Text(currentTrackTimestamp).multilineTextAlignment(.leading)
                     .contentTransition(.numericText())
@@ -121,6 +138,7 @@ private extension PlayerControls {
             .font(.system(size: 24, weight: .black, design: .rounded))
             .opacity(nil == configuration.currentTrackPosition ? 0 : 1)
         }
+        .gesture(scrubGesture)
     }
     
     
@@ -161,6 +179,76 @@ private extension PlayerControls {
     
     var currentTrackTotalTimestamp: String {
         configuration.currentTrackPosition?.total.mediaPositionTimestamp ?? "🫪"
+    }
+}
+
+
+
+private extension PlayerControls {
+    
+    var scrubGesture: some Gesture {
+        let id = UUID()
+        let startPosition = configuration.currentTrackPosition?.current ?? .zero
+        let wasPlayingAtStart = configuration.isPlaying
+        var phase = PlayerAction.TransportTransaction.Phase.starting
+        
+        return DragGesture(minimumDistance: 0)
+            .updating($scrubPreviewPosition) { value, previewPosition, transaction in
+                defer { phase = .ongoing }
+                previewPosition = scrubPosition(atX: value.location.x)
+                transaction.animation = nil // The fill follows the finger, no easing
+                
+                if let previewPosition {
+                    performUserAction(.scrub(transaction: .init(
+                        id: id,
+                        startPosition: startPosition,
+                        currentPosition: .setPlayhead(to: previewPosition),
+                        wasPlayingAtStart: wasPlayingAtStart,
+                        phase: phase,
+                    )))
+                }
+                else {
+                    performUserAction(.scrub(transaction: .init(
+                        id: id,
+                        startPosition: startPosition,
+                        currentPosition: .makeNoChange,
+                        wasPlayingAtStart: wasPlayingAtStart,
+                        phase: phase,
+                    )))
+                }
+            }
+            .onEnded { value in
+                guard let target = scrubPosition(atX: value.location.x) else {
+                    performUserAction(.scrub(transaction: .init(
+                        id: id,
+                        startPosition: startPosition,
+                        currentPosition: .makeNoChange,
+                        wasPlayingAtStart: wasPlayingAtStart,
+                        phase: .complete,
+                    )))
+                    return
+                }
+                
+                performUserAction(.scrub(transaction: .init(
+                    id: id,
+                    startPosition: startPosition,
+                    currentPosition: .setPlayhead(to: target),
+                    wasPlayingAtStart: wasPlayingAtStart,
+                    phase: .complete,
+                )))
+            }
+    }
+    
+    
+    /// The playhead position under an x-coordinate of the scrub bar, or `nil` when no position is known
+    func scrubPosition(atX x: CGFloat) -> Duration? {
+        guard let total = configuration.currentTrackPosition?.total,
+              0 < scrubBarWidth
+                else {
+            return nil
+        }
+        
+        return total * min(max(x / scrubBarWidth, 0), 1)
     }
 }
 
@@ -376,10 +464,47 @@ public enum PlayerAction: Sendable {
     
     
     
-    public struct TransportTransaction: Sendable {
-        public let transactionId: UUID
+    /// Describes the state of a transport action, such as scrubbing or fast-forwarding
+    public struct TransportTransaction: Sendable, Identifiable {
+        public let id: UUID
+        
+        /// The playhead position when the transaction started
         public let startPosition: Duration
-        public let currentPosition: Duration
+        
+        /// The current position that the user wants the playhead
+        public let currentPosition: UserPosition
+        
+        /// Whether the player was actively playing an item when the transaction started
+        public let wasPlayingAtStart: Bool
+        
+        /// The current phase of this transaction update
+        public let phase: Phase
+        
+        
+        
+        /// Where the user , in a transport transaction
+        public enum UserPosition: Sendable, Equatable {
+            
+            /// The user wants to move the playhead to this specific moment
+            case setPlayhead(to: Duration)
+            
+            /// The user does not want to make a change (e.g. is cancelling an existing seek)
+            case makeNoChange
+        }
+        
+        
+        
+        public enum Phase: Sendable, Equatable {
+            
+            /// This is the first update in this transaction
+            case starting
+            
+            /// The transaction is ongoing; this update is a normal update in the middle of the transaction
+            case ongoing
+            
+            /// No further updates will be sent for this transaction, and all other fields indicate the user's final desired state
+            case complete
+        }
     }
 }
 

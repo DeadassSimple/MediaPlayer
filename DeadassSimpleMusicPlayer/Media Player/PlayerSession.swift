@@ -349,8 +349,30 @@ public extension PlayerSession {
         case .reverse(transaction: let transaction),
                 .fastForward(transaction: let transaction),
                 .scrub(transaction: let transaction):
+            
+//        todo: distinguish preview from done
+            
+            switch transaction.phase {
+            case .starting:
+                engine.pause()
+                
+            case .ongoing:
+                break
+                
+            case .complete:
+                if transaction.wasPlayingAtStart {
+                    engine.play()
+                }
+            }
+            
             // A `TransportTransaction` has positions and no rate, so the controls calculate the position, and `perform(_:)` only moves the playhead to that position
-            seekWithinCurrentItem(to: transaction.currentPosition / .seconds(1))
+            switch transaction.currentPosition {
+            case .setPlayhead(to: let newTime):
+                seekWithinCurrentItem(to: newTime / .seconds(1))
+                
+            case.makeNoChange:
+                return
+            }
         }
     }
     
