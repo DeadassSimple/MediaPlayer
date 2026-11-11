@@ -117,12 +117,12 @@ private extension PlayerControls {
         VStack(spacing: 0) {
             ZStack(alignment: .left(in: layoutDirection)) {
                 scrubBarBackground
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { scrubBarWidth = $0 }
                 
                 scrubBarForeground
             }
             .frame(height: 4 * 3)
             .animation(.linear(duration: configuration.updateFrequency), value: configuration)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { scrubBarWidth = $0 }
 
 
             HStack {
@@ -139,15 +139,24 @@ private extension PlayerControls {
             .opacity(nil == configuration.currentTrackPosition ? 0 : 1)
         }
         .gesture(scrubGesture)
+        .onChange(of: scrubSession) { oldSession, newSession in
+            if let oldSession, nil == newSession {
+                // A scrub session just ended. Send a `.complete`.
+                performUserAction(.scrub(transaction: .init(
+                    id: oldSession.id,
+                    startPosition: oldSession.startPosition,
+                    currentPosition: oldSession.currentPosition.map { .setPlayhead(to: $0) } ?? .makeNoChange,
+                    wasPlayingAtStart: oldSession.wasPlayingAtStart,
+                    phase: .complete,
+                )))
+            }
+        }
     }
     
     
     private var scrubBarForeground: some View {
         Rectangle()
             .fill(.accent)
-//            .containerRelativeFrame(.horizontal, alignment: .left(in: layoutDirection)) { length, _ in
-//                length * currentTrackPercent
-//            }
             .relativeProposed(width: currentTrackPercent)
     }
     
@@ -190,6 +199,7 @@ private extension PlayerControls {
         DragGesture(minimumDistance: 0)
             .updating($scrubSession) { value, _scrubSession, transaction in
                 defer { _scrubSession?.phase = .ongoing }
+                transaction.animation = nil
                 
                 let currentPosition = scrubPosition(atX: value.location.x)
                 _scrubSession?.currentPosition = currentPosition
@@ -206,7 +216,6 @@ private extension PlayerControls {
                     )
                     _scrubSession = scrubSession
                 }
-//                transaction.animation = nil
                 
                 guard let currentPosition else {
                     performUserAction(.scrub(transaction: .init(
@@ -225,32 +234,6 @@ private extension PlayerControls {
                     currentPosition: .setPlayhead(to: currentPosition),
                     wasPlayingAtStart: scrubSession.wasPlayingAtStart,
                     phase: scrubSession.phase,
-                )))
-            }
-            .onEnded { value in
-                guard let scrubSession else {
-                    // Unsure if we can do anything if we can't even say the session's ID
-                    return
-                }
-                
-                
-                guard let target = scrubPosition(atX: value.location.x) else {
-                    performUserAction(.scrub(transaction: .init(
-                        id: scrubSession.id,
-                        startPosition: scrubSession.startPosition,
-                        currentPosition: .makeNoChange,
-                        wasPlayingAtStart: scrubSession.wasPlayingAtStart,
-                        phase: .complete,
-                    )))
-                    return
-                }
-                
-                performUserAction(.scrub(transaction: .init(
-                    id: scrubSession.id,
-                    startPosition: scrubSession.startPosition,
-                    currentPosition: .setPlayhead(to: target),
-                    wasPlayingAtStart: scrubSession.wasPlayingAtStart,
-                    phase: .complete,
                 )))
             }
     }
