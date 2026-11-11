@@ -51,7 +51,7 @@ private struct PlayerControls: View {
     
     
     @GestureState
-    private var scrubPreviewPosition: Duration? = nil
+    private var scrubSession: ScrubSession? = nil
     
     
     var body: some View {
@@ -187,53 +187,69 @@ private extension PlayerControls {
 private extension PlayerControls {
     
     var scrubGesture: some Gesture {
-        let id = UUID()
-        let startPosition = configuration.currentTrackPosition?.current ?? .zero
-        let wasPlayingAtStart = configuration.isPlaying
-        var phase = PlayerAction.TransportTransaction.Phase.starting
-        
-        return DragGesture(minimumDistance: 0)
-            .updating($scrubPreviewPosition) { value, previewPosition, transaction in
-                defer { phase = .ongoing }
-                previewPosition = scrubPosition(atX: value.location.x)
-                transaction.animation = nil // The fill follows the finger, no easing
+        DragGesture(minimumDistance: 0)
+            .updating($scrubSession) { value, _scrubSession, transaction in
+                defer { _scrubSession?.phase = .ongoing }
                 
-                if let previewPosition {
-                    performUserAction(.scrub(transaction: .init(
-                        id: id,
-                        startPosition: startPosition,
-                        currentPosition: .setPlayhead(to: previewPosition),
-                        wasPlayingAtStart: wasPlayingAtStart,
-                        phase: phase,
-                    )))
+                let currentPosition = scrubPosition(atX: value.location.x)
+                _scrubSession?.currentPosition = currentPosition
+                
+                let scrubSession: ScrubSession
+                if let _scrubSession {
+                    scrubSession = _scrubSession
                 }
                 else {
-                    performUserAction(.scrub(transaction: .init(
-                        id: id,
-                        startPosition: startPosition,
-                        currentPosition: .makeNoChange,
-                        wasPlayingAtStart: wasPlayingAtStart,
-                        phase: phase,
-                    )))
+                    scrubSession = ScrubSession(
+                        startPosition: configuration.currentTrackPosition?.current ?? .zero,
+                        wasPlayingAtStart: configuration.isPlaying,
+                        phase: .starting,
+                    )
+                    _scrubSession = scrubSession
                 }
+//                transaction.animation = nil
+                
+                guard let currentPosition else {
+                    performUserAction(.scrub(transaction: .init(
+                        id: scrubSession.id,
+                        startPosition: scrubSession.startPosition,
+                        currentPosition: .makeNoChange,
+                        wasPlayingAtStart: scrubSession.wasPlayingAtStart,
+                        phase: scrubSession.phase,
+                    )))
+                    return
+                }
+                
+                performUserAction(.scrub(transaction: .init(
+                    id: scrubSession.id,
+                    startPosition: scrubSession.startPosition,
+                    currentPosition: .setPlayhead(to: currentPosition),
+                    wasPlayingAtStart: scrubSession.wasPlayingAtStart,
+                    phase: scrubSession.phase,
+                )))
             }
             .onEnded { value in
+                guard let scrubSession else {
+                    // Unsure if we can do anything if we can't even say the session's ID
+                    return
+                }
+                
+                
                 guard let target = scrubPosition(atX: value.location.x) else {
                     performUserAction(.scrub(transaction: .init(
-                        id: id,
-                        startPosition: startPosition,
+                        id: scrubSession.id,
+                        startPosition: scrubSession.startPosition,
                         currentPosition: .makeNoChange,
-                        wasPlayingAtStart: wasPlayingAtStart,
+                        wasPlayingAtStart: scrubSession.wasPlayingAtStart,
                         phase: .complete,
                     )))
                     return
                 }
                 
                 performUserAction(.scrub(transaction: .init(
-                    id: id,
-                    startPosition: startPosition,
+                    id: scrubSession.id,
+                    startPosition: scrubSession.startPosition,
                     currentPosition: .setPlayhead(to: target),
-                    wasPlayingAtStart: wasPlayingAtStart,
+                    wasPlayingAtStart: scrubSession.wasPlayingAtStart,
                     phase: .complete,
                 )))
             }
@@ -534,6 +550,31 @@ private struct PlayerControlsViewModifier: ViewModifier {
 }
 
 
+
+/// The state of a user's session of scrubbing through the current item to find where they want the palyhead
+private struct ScrubSession: Equatable, Identifiable {
+    
+    /// Uniquely identifiers the scrubbing session
+    let id = UUID()
+    
+    /// Where in the item the playhead sat before the user started scrubbing
+    let startPosition: Duration
+    
+    /// Whether the item was playing when the user started scrubbing
+    let wasPlayingAtStart: Bool
+    
+    /// Where in the item the playhead sits as the user is currently scrubbing.
+    ///
+    /// `nil` indicates that the user wishes to cancel the scrubbing
+    var currentPosition: Duration?
+    
+    /// The current phase of the transport action that this scrub session takes place within
+    var phase: PlayerAction.TransportTransaction.Phase
+}
+
+
+
+// MARK: - Previews
 
 public extension View {
     func playerControls(configuration: PlayerControlsConfiguration, onUserAction: @escaping PlayerAction.OnUserAction) -> some View {
