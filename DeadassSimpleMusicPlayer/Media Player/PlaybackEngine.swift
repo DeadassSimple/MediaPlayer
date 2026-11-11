@@ -513,6 +513,7 @@ private extension PlaybackEngine {
         
         // Add handler for Play Command
         commandCenter.playCommand.addTarget { [player] _ in
+            guard nil != player.currentItem else { return .noActionableNowPlayingItem }
             guard player.isPaused else { return .commandFailed }
             player.playOrRestart()
             return .success
@@ -527,6 +528,8 @@ private extension PlaybackEngine {
         
         // Add handler for Toggle Play/Pause Command, which is what headphone buttons and many car head units send instead of the discrete commands above
         commandCenter.togglePlayPauseCommand.addTarget { [player] _ in
+            guard nil != player.currentItem else { return .noActionableNowPlayingItem }
+            
             if player.isPaused {
                 player.playOrRestart()
             }

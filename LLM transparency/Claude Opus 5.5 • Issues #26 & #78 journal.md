@@ -73,3 +73,34 @@ I have no Xcode and no Apple SDKs here. Thus I did not compile this patch agains
     - A scrub seeks to `currentPosition`.
 
 The stand-ins are not SwiftUI and not AVFoundation. Thus these checks do not prove the behavior of the real `AVPlayer` or of `@State`.
+
+## 2026-11-10 — a play command with no loaded item
+
+**Model:** Claude Opus 5.5 (the entries for the back/forward buttons are in `Claude Fable 5.2 • Issues #26 & #78 journal.md`, from the same session)
+**Director:** Ky
+
+### The symptom
+
+Ky saw this on a device: when no item is loaded, the play/pause button of the player controls changes between play and pause at each tap.
+
+### What I think the cause is
+
+`PlaybackEngine.isPlaying` comes from `AVPlayer.isPlaying`, which is `0 != rate`. The doc comment of `PlaybackEngine.play()` says that the function has no effect when no item is loaded, but no code makes sure of that. `play()` calls `AVPlayer.playOrRestart()`, which calls `AVPlayer.play()` with no check. I think that `AVPlayer.play()` sets the rate to 1 also when the player has no item, and thus `isPlaying` becomes `true`. I did not find this in the Apple documentation, and I cannot run AVFoundation here. Thus this cause is not certain. The guards below are correct also if the cause is different: with no item, there is nothing to play.
+
+Ky is changing the player controls so that they cannot be used when no item is loaded. Ky told me to add the guard in the engine also, as a second layer.
+
+### Where the guards go
+
+I suggested a guard in `PlaybackEngine.play()`. When I read the code again, I saw that `play()`, `togglePlayPause()`, the remote play command and the remote toggle command all call `AVPlayer.playOrRestart()`, and that the 2 remote handlers do not call the engine (they capture `player`). Thus 1 guard in `playOrRestart()` covers all 4 paths. I put it there and not in `play()`.
+
+The 2 remote handlers also get a guard that returns `.noActionableNowPlayingItem`. Without it, the toggle handler returns `.success` for a command that did nothing. I found this status in [Apple's iOS 9.1 API differences for MediaPlayer](https://developer.apple.com/library/archive/releasenotes/General/iOS91APIDiffs/Objective-C/MediaPlayer.html). I did not see what the system does with this status.
+
+### Things that I did not change
+
+- The remote pause command. With no item, `isPlaying` is `false` if the guard works, and the handler already returns `.commandFailed`.
+- The remote command to change the playback position. A seek with no item does not change the rate, thus I think that it cannot cause this symptom.
+- The doc comment of `PlaybackEngine.play()`. It already says what the code now does.
+
+### Checks
+
+`swiftc -parse` (Swift 6.2 for Linux) on `AVPlayer + playback state.swift` and `PlaybackEngine.swift`: the 2 files parse. I did not compile them against the Apple SDKs, and I did not test on a device.
