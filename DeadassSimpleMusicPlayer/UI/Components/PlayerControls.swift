@@ -120,8 +120,18 @@ private extension PlayerControls {
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { scrubBarWidth = $0 }
                 
                 scrubBarForeground
+                    .overlay(alignment: .trailing) {
+                        if nil != scrubSession {
+                            VStack {
+                                Image(.TransportControls.playhead)
+                            }
+                            .offset(x: 2.5 * pixelSize, y: -12 * pixelSize)
+//                            .drawingGroup()
+                            .transition(.push(from: .bottom).animation(.bouncy))
+                        }
+                    }
             }
-            .frame(height: 4 * 3)
+            .frame(height: 4 * pixelSize)
             .animation(.linear(duration: configuration.updateFrequency), value: configuration)
 
 
@@ -197,57 +207,58 @@ private extension PlayerControls {
     
     var scrubGesture: some Gesture {
         DragGesture(minimumDistance: 0)
-            .updating($scrubSession) { value, _scrubSession, transaction in
-                defer { _scrubSession?.phase = .ongoing }
+            .updating($scrubSession) { value, inoutScrubSession, transaction in
+                defer { inoutScrubSession?.phase = .ongoing }
                 transaction.animation = nil
                 
-                let currentPosition = scrubPosition(atX: value.location.x)
-                _scrubSession?.currentPosition = currentPosition
-                
-                let scrubSession: ScrubSession
-                if let _scrubSession {
-                    scrubSession = _scrubSession
+                let _temp_scrubSession: ScrubSession
+                if let inoutScrubSession {
+                    _temp_scrubSession = inoutScrubSession
                 }
                 else {
-                    scrubSession = ScrubSession(
+                    _temp_scrubSession = ScrubSession(
                         startPosition: configuration.currentTrackPosition?.current ?? .zero,
                         wasPlayingAtStart: configuration.isPlaying,
                         phase: .starting,
                     )
-                    _scrubSession = scrubSession
+                    inoutScrubSession = _temp_scrubSession
                 }
+                
+                let currentPosition = scrubPosition(movedBy: value.translation.width, from: _temp_scrubSession.startPosition)
+                inoutScrubSession?.currentPosition = currentPosition
                 
                 guard let currentPosition else {
                     performUserAction(.scrub(transaction: .init(
-                        id: scrubSession.id,
-                        startPosition: scrubSession.startPosition,
+                        id: _temp_scrubSession.id,
+                        startPosition: _temp_scrubSession.startPosition,
                         currentPosition: .makeNoChange,
-                        wasPlayingAtStart: scrubSession.wasPlayingAtStart,
-                        phase: scrubSession.phase,
+                        wasPlayingAtStart: _temp_scrubSession.wasPlayingAtStart,
+                        phase: _temp_scrubSession.phase,
                     )))
                     return
                 }
                 
                 performUserAction(.scrub(transaction: .init(
-                    id: scrubSession.id,
-                    startPosition: scrubSession.startPosition,
+                    id: _temp_scrubSession.id,
+                    startPosition: _temp_scrubSession.startPosition,
                     currentPosition: .setPlayhead(to: currentPosition),
-                    wasPlayingAtStart: scrubSession.wasPlayingAtStart,
-                    phase: scrubSession.phase,
+                    wasPlayingAtStart: _temp_scrubSession.wasPlayingAtStart,
+                    phase: _temp_scrubSession.phase,
                 )))
             }
     }
     
     
-    /// The playhead position under an x-coordinate of the scrub bar, or `nil` when no position is known
-    func scrubPosition(atX x: CGFloat) -> Duration? {
+    /// The playhead position after the finger moves `distance` points along the scrub bar, starting from `startPosition`, or `nil` when no position is known
+    func scrubPosition(movedBy distance: CGFloat, from startPosition: Duration) -> Duration? {
         guard let total = configuration.currentTrackPosition?.total,
               0 < scrubBarWidth
                 else {
             return nil
         }
         
-        return total * min(max(x / scrubBarWidth, 0), 1)
+        let position = startPosition + (total * (distance / scrubBarWidth))
+        return min(max(position, .zero), total)
     }
 }
 
@@ -374,7 +385,7 @@ private extension PlayerControls {
                 .font(.system(size: size/3, weight: .black, design: .rounded))
                 .foregroundStyle(.brand)
                 .multilineTextAlignment(.center)
-                .padding(.top, imageName.verticalPixelOffsetForCenteredText * 3)
+                .padding(.top, imageName.verticalPixelOffsetForCenteredText * pixelSize)
         }
     }
 }
@@ -567,8 +578,10 @@ public extension View {
 
 
 
-private let __preview_trackPosition_early = PlayheadPosition(current: .seconds(4), total: .seconds((3 * 60) + 45))
-private let __preview_trackPosition_late = PlayheadPosition(current: .seconds((3 * 60) + 43), total: .seconds((3 * 60) + 45))
+private let __preview_total = Duration.seconds((3 * 60) + 45)
+private let __preview_trackPosition_early = PlayheadPosition(current: .seconds(4), total: __preview_total)
+private let __preview_trackPosition_mid = PlayheadPosition(current: .seconds((2 * 60) + 22), total: __preview_total)
+private let __preview_trackPosition_late = PlayheadPosition(current: .seconds((3 * 60) + 43), total: __preview_total)
 
 
 
@@ -588,7 +601,7 @@ private let __preview_trackPosition_late = PlayheadPosition(current: .seconds((3
         .playerControls(configuration: .init(
             updateFrequency: 0,
             isPlaying: true,
-            currentTrackPosition: __preview_trackPosition_late,
+            currentTrackPosition: __preview_trackPosition_mid,
             backForwardKind: .skipTime(forwardIncrement: .seconds(15), backwardIncrement: .seconds(15)),
         ), onUserAction: null)
 }
