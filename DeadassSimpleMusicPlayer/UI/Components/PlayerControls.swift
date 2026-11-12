@@ -19,6 +19,9 @@ private let ignoredSafeAreaEdges: Edge.Set = .bottom
 private let buttonSize_large: CGFloat = 78
 private let buttonSize_regular: CGFloat = 72
 
+private let playheadHeight: CGFloat = 8 * pixelSize
+private let playheadVerticalOffset: CGFloat = 7 * pixelSize
+
 
 
 /// This view contains configurable controls for a media player, designed to appear in the same location on-screen at all times.
@@ -50,7 +53,7 @@ private struct PlayerControls: View {
     private var scrubBarWidth: CGFloat = 0
     
     
-    @GestureState
+    @GestureState(resetTransaction: Transaction(animation: .bouncy))
     private var scrubSession: ScrubSession? = nil
     
     
@@ -125,9 +128,22 @@ private extension PlayerControls {
                             VStack {
                                 Image(.TransportControls.playhead)
                             }
-                            .offset(x: 2.5 * pixelSize, y: -12 * pixelSize)
+                            .offset(x: 2.5 * pixelSize, y: -(playheadVerticalOffset + playheadHeight))
 //                            .drawingGroup()
-                            .transition(.push(from: .bottom).animation(.bouncy))
+                            .transition(
+                                .asymmetric(
+                                    insertion:
+                                            .offset(y: playheadVerticalOffset)
+//                                            .combined(with: .opacity)
+                                            .animation(.bouncy)
+                                    ,
+                                    removal:
+                                            .offset(y: playheadVerticalOffset)
+                                            .animation(.bouncy)
+                                    ,
+                                )
+                                .combined(with: .opacity)
+                            )
                         }
                     }
             }
@@ -209,7 +225,7 @@ private extension PlayerControls {
         DragGesture(minimumDistance: 0)
             .updating($scrubSession) { value, inoutScrubSession, transaction in
                 defer { inoutScrubSession?.phase = .ongoing }
-                transaction.animation = nil
+                transaction.animation = .bouncy
                 
                 let _temp_scrubSession: ScrubSession
                 if let inoutScrubSession {
