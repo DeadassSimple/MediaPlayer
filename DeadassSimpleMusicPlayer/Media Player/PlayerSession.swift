@@ -368,10 +368,10 @@ public extension PlayerSession {
             // A `TransportTransaction` has positions and no rate, so the controls calculate the position, and `perform(_:)` only moves the playhead to that position
             switch transaction.currentPosition {
             case .setPlayhead(to: let newTime):
-                seekWithinCurrentItem(to: newTime / .seconds(1))
+                seekWithinCurrentItem(to: newTime.timeInterval)
                 
             case.makeNoChange:
-                return
+                seekWithinCurrentItem(to: transaction.startPosition.timeInterval)
             }
         }
     }

@@ -22,6 +22,9 @@ private let buttonSize_regular: CGFloat = 72
 private let playheadHeight: CGFloat = 8 * pixelSize
 private let playheadVerticalOffset: CGFloat = 7 * pixelSize
 
+/// How far above the scrub bar the user's finger must go to cancel a scrub gesture
+private let scrubCancelDistance: CGFloat = 60
+
 
 
 /// This view contains configurable controls for a media player, designed to appear in the same location on-screen at all times.
@@ -222,10 +225,12 @@ private extension PlayerControls {
 private extension PlayerControls {
     
     var scrubGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: 2)
             .updating($scrubSession) { value, inoutScrubSession, transaction in
                 defer { inoutScrubSession?.phase = .ongoing }
                 transaction.animation = .bouncy
+                
+                let isCancelled = value.location.y < -scrubCancelDistance
                 
                 let _temp_scrubSession: ScrubSession
                 if let inoutScrubSession {
@@ -239,8 +244,9 @@ private extension PlayerControls {
                     )
                     inoutScrubSession = _temp_scrubSession
                 }
-                
-                let currentPosition = scrubPosition(movedBy: value.translation.width, from: _temp_scrubSession.startPosition)
+                let currentPosition = isCancelled
+                    ? nil
+                    : scrubPosition(movedBy: value.translation.width, from: _temp_scrubSession.startPosition)
                 inoutScrubSession?.currentPosition = currentPosition
                 
                 guard let currentPosition else {
@@ -285,18 +291,18 @@ private extension PlayerControls {
 private extension PlayerControls {
     var transportButtons: some View {
         HStack {
-            backButton
-                .transition(.opacity.animation(.smooth))
-            
-            Spacer(minLength: 32).fixedSize()
-            
-            playPauseButton
-                .transition(.opacity.animation(.smooth))
-            
-            Spacer(minLength: 32).fixedSize()
-            
-            forwardButton
-                .transition(.opacity.animation(.smooth))
+            Group {
+                backButton
+                
+                Spacer(minLength: 32).fixedSize()
+                
+                playPauseButton
+                
+                Spacer(minLength: 32).fixedSize()
+                
+                forwardButton
+            }
+            .transition(.opacity.animation(.smooth.delay(0.1)))
         }
         .disabled(disabled)
     }
