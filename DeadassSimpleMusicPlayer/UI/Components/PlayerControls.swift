@@ -23,7 +23,7 @@ private let playheadHeight: CGFloat = 8 * pixelSize
 private let playheadVerticalOffset: CGFloat = 7 * pixelSize
 
 /// How far above the scrub bar the user's finger must go to cancel a scrub gesture
-private let scrubCancelDistance: CGFloat = 60
+private let scrubCancelDistance: CGFloat = 100
 
 
 
@@ -132,19 +132,8 @@ private extension PlayerControls {
                                 Image(.TransportControls.playhead)
                             }
                             .offset(x: 2.5 * pixelSize, y: -(playheadVerticalOffset + playheadHeight))
-//                            .drawingGroup()
                             .transition(
-                                .asymmetric(
-                                    insertion:
-                                            .offset(y: playheadVerticalOffset)
-//                                            .combined(with: .opacity)
-                                            .animation(.bouncy)
-                                    ,
-                                    removal:
-                                            .offset(y: playheadVerticalOffset)
-                                            .animation(.bouncy)
-                                    ,
-                                )
+                                .offset(y: reduceMotion ? 0 : playheadVerticalOffset)
                                 .combined(with: .opacity)
                             )
                         }
