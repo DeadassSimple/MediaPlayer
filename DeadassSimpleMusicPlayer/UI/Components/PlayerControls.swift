@@ -19,11 +19,13 @@ private let ignoredSafeAreaEdges: Edge.Set = .bottom
 private let buttonSize_large: CGFloat = 78
 private let buttonSize_regular: CGFloat = 72
 
-private let playheadHeight: CGFloat = 8 * pixelSize
-private let playheadVerticalOffset: CGFloat = 7 * pixelSize
+private let playheadHeight: CGFloat = pixels(8)
+private let playheadVerticalOffset: CGFloat = pixels(7)
 
+private let scrubBarHeight: CGFloat = pixels(4)
 /// How far above the scrub bar the user's finger must go to cancel a scrub gesture
 private let scrubCancelDistance: CGFloat = 100
+private let scrubIndicatorFingertipClearance: CGFloat = 44
 
 
 
@@ -126,23 +128,14 @@ private extension PlayerControls {
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { scrubBarWidth = $0 }
                 
                 scrubBarForeground
-                    .overlay(alignment: .trailing) {
-                        if nil != scrubSession {
-                            VStack {
-                                Image(.TransportControls.playhead)
-                            }
-                            .offset(x: 2.5 * pixelSize, y: -(playheadVerticalOffset + playheadHeight))
-                            .transition(
-                                .offset(y: reduceMotion ? 0 : playheadVerticalOffset)
-                                .combined(with: .opacity)
-                            )
-                        }
+                    .overlay(alignment: .topLeading) {
+                        playhead
                     }
             }
-            .frame(height: 4 * pixelSize)
+            .frame(height: scrubBarHeight)
             .animation(.linear(duration: configuration.updateFrequency), value: configuration)
-
-
+            
+            
             HStack {
                 Text(currentTrackTimestamp).multilineTextAlignment(.leading)
                     .contentTransition(.numericText())
@@ -156,6 +149,7 @@ private extension PlayerControls {
             .font(.system(size: 24, weight: .black, design: .rounded))
             .opacity(nil == configuration.currentTrackPosition ? 0 : 1)
         }
+        
         .gesture(scrubGesture)
         .onChange(of: scrubSession) { oldSession, newSession in
             if let oldSession, nil == newSession {
@@ -182,6 +176,59 @@ private extension PlayerControls {
     private var scrubBarBackground: some View {
         Rectangle()
             .fill(Color.accentColor.opacity(0.2))
+    }
+    
+    
+    @ViewBuilder
+    private var playhead: some View {
+        if let scrubSession {
+            scrubIndicator(isCancelled: scrubSession.isCancelled)
+                .fixedSize()
+                // Pin the indicator by its bottom center, so "Cancel" appearing grows it upward
+                .alignmentGuide(.leading) { $0.width / 2 }
+//                .alignmentGuide(.top) { $0.height }
+                .offset(scrubIndicatorAnchor(for: scrubSession))
+                .allowsHitTesting(false)
+                .transition(
+                    .offset(y: reduceMotion ? 0 : playheadVerticalOffset)
+                    .combined(with: .opacity)
+                )
+        }
+    }
+    
+    func scrubIndicator(isCancelled: Bool) -> some View {
+        VStack(spacing: pixels(5)) {
+            if isCancelled {
+                Text("Cancel")
+                    .font(.system(size: 24, weight: .black, design: .rounded))
+                    .foregroundStyle(.red)
+            }
+            
+            scrubIndicatorImage(isCancelled: isCancelled)
+                .scaleEffect(pixels(1))
+        }
+    }
+    
+    
+    func scrubIndicatorImage(isCancelled: Bool) -> some View {
+        isCancelled
+            ? Image(.TransportControls.cancelScrub)
+            : Image(.TransportControls.playhead)
+    }
+    
+    
+    /// Where the bottom center of the scrub indicator goes, in the scrub bar's coordinate space
+    func scrubIndicatorAnchor(for scrubSession: ScrubSession) -> CGSize {
+        if scrubSession.isCancelled {
+            return CGSize(
+                width: scrubSession.fingerLocation.x,
+                height: scrubSession.fingerLocation.y - scrubIndicatorFingertipClearance)
+        }
+        else {
+            return CGSize(
+                width: (currentTrackPercent * scrubBarWidth) - pixels(1),
+                height: (scrubBarHeight / 2) - playheadVerticalOffset - (playheadHeight / 2))
+        }
     }
 }
 
@@ -237,6 +284,7 @@ private extension PlayerControls {
                     ? nil
                     : scrubPosition(movedBy: value.translation.width, from: _temp_scrubSession.startPosition)
                 inoutScrubSession?.currentPosition = currentPosition
+                inoutScrubSession?.fingerLocation = value.location
                 
                 guard let currentPosition else {
                     performUserAction(.scrub(transaction: .init(
@@ -396,7 +444,7 @@ private extension PlayerControls {
                 .font(.system(size: size/3, weight: .black, design: .rounded))
                 .foregroundStyle(.brand)
                 .multilineTextAlignment(.center)
-                .padding(.top, imageName.verticalPixelOffsetForCenteredText * pixelSize)
+                .padding(.top, pixels(imageName.verticalPixelOffsetForCenteredText))
         }
     }
 }
@@ -541,11 +589,11 @@ private struct PlayerControlsViewModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay {
             VStack {
-                Spacer(minLength: 144).allowsHitTesting(false)
+                Spacer(minLength: pixels(48)).allowsHitTesting(false)
                     .layoutPriority(2)
 
                 PlayerControls(configuration: configuration, onUserAction: onUserAction)
-                    .frame(minHeight: 292)
+                    .frame(minHeight: pixels(96))
                     .layoutPriority(0)
             }
 //            .border(.blue)
@@ -575,6 +623,16 @@ private struct ScrubSession: Equatable, Identifiable {
     
     /// The current phase of the transport action that this scrub session takes place within
     var phase: PlayerAction.TransportTransaction.Phase
+    
+    /// Where the user's finger is, in the scrub bar's coordinate space
+    var fingerLocation: CGPoint = .zero
+}
+
+
+
+extension ScrubSession {
+    /// Whether the finger is far enough above the scrub bar to cancel the scrub
+    var isCancelled: Bool { nil == currentPosition }
 }
 
 
