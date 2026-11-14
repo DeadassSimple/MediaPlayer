@@ -25,9 +25,3 @@ public extension PlayheadPosition {
         )
     }
 }
-
-
-
-public extension PlayheadPosition {
-    static let null: Self = .init(current: .zero, total: .zero)
-}

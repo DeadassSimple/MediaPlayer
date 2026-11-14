@@ -26,7 +26,7 @@ private let scrubBarHeight: CGFloat = pixels(4)
 /// How far above the scrub bar the user's finger must go to cancel a scrub gesture
 private let scrubCancelDistance: CGFloat = 100
 /// The assumed radius of the user's fingertip, in points
-private let scrubIndicatorFingertipClearance: CGFloat = 44
+private let minimumFingertipRadius: CGFloat = 44
 
 
 
@@ -135,7 +135,7 @@ private extension PlayerControls {
                         // anchoring it to the top-left lets us calculate the position of the playhead just like we
                         // calculate the length of the scrub bar foreground
                         
-                        playhead
+                        positionedPlayhead
                     }
             }
             .frame(height: scrubBarHeight)
@@ -186,15 +186,15 @@ private extension PlayerControls {
     
     
     @ViewBuilder
-    private var playhead: some View {
+    private var positionedPlayhead: some View {
         if let scrubSession {
             Color.clear
                 .frame(width: 0, height: 0)
-                .overlay(alignment: .top) {
-                    scrubIndicator(isCancelled: scrubSession.isCancelling)
+                .overlay(alignment: .bottom) {
+                    playhead(isCancelled: scrubSession.isCancelling)
                         .fixedSize()
                 }
-                .offset(scrubIndicatorAnchor(for: scrubSession))
+                .offset(playheadAnchor_bottomCenter(for: scrubSession))
                 .allowsHitTesting(false)
                 .transition(
                     .offset(y: reduceMotion ? 0 : playheadVerticalOffset)
@@ -204,7 +204,7 @@ private extension PlayerControls {
     }
     
     
-    func scrubIndicator(isCancelled: Bool) -> some View {
+    func playhead(isCancelled: Bool) -> some View {
         VStack(spacing: pixels(5)) {
             if isCancelled {
                 Text("Cancel")
@@ -212,13 +212,13 @@ private extension PlayerControls {
                     .foregroundStyle(.red)
             }
             
-            scrubIndicatorImage(isCancelled: isCancelled)
+            playheadImage(isCancelled: isCancelled)
                 .scaleEffect(pixels(1))
         }
     }
     
     
-    func scrubIndicatorImage(isCancelled: Bool) -> some View {
+    func playheadImage(isCancelled: Bool) -> some View {
         isCancelled
             ? Image(.TransportControls.cancelScrub)
             : Image(.TransportControls.playhead)
@@ -226,11 +226,11 @@ private extension PlayerControls {
     
     
     /// Where the bottom center of the scrub indicator goes, in the scrub bar's coordinate space
-    func scrubIndicatorAnchor(for scrubSession: ScrubSession) -> CGSize {
+    func playheadAnchor_bottomCenter(for scrubSession: ScrubSession) -> CGSize {
         if scrubSession.isCancelling {
             return CGSize(
                 width: scrubSession.fingerLocation.x,
-                height: scrubSession.fingerLocation.y - (playheadVerticalOffset + scrubIndicatorFingertipClearance + playheadHeight))
+                height: scrubSession.fingerLocation.y - (minimumFingertipRadius + playheadHeight))
         }
         else {
             return CGSize(
@@ -440,7 +440,7 @@ private extension PlayerControls {
             
             Text(overlayText)
                 .font(.system(size: size/3, weight: .black, design: .rounded))
-                .foregroundStyle(.brand)
+                .foregroundStyle(.accent)
                 .multilineTextAlignment(.center)
                 .padding(.top, pixels(imageName.verticalPixelOffsetForCenteredText))
         }
@@ -594,7 +594,6 @@ private struct PlayerControlsViewModifier: ViewModifier {
                     .frame(minHeight: pixels(96))
                     .layoutPriority(0)
             }
-//            .border(.blue)
             .ignoresSafeArea(edges: ignoredSafeAreaEdges)
         }
     }
@@ -645,14 +644,14 @@ public extension View {
 
 
 
-private let __preview_total = Duration.seconds((3 * 60) + 45)
+private let __preview_total = Duration.seconds((1 * 60 * 60) + (13 * 60) + 43)
 private let __preview_trackPosition_early = PlayheadPosition(current: .seconds(4), total: __preview_total)
-private let __preview_trackPosition_mid = PlayheadPosition(current: .seconds((2 * 60) + 22), total: __preview_total)
-private let __preview_trackPosition_late = PlayheadPosition(current: .seconds((3 * 60) + 43), total: __preview_total)
+private let __preview_trackPosition_mid = PlayheadPosition(current: __preview_total * 0.6, total: __preview_total)
+private let __preview_trackPosition_late = PlayheadPosition(current: __preview_total * 0.95, total: __preview_total)
 
 
 
-#Preview("Paused music") {
+#Preview("No music") {
     Rectangle().fill(.background)
         .playerControls(configuration: .init(
             updateFrequency: 0,
