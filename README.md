@@ -12,6 +12,11 @@ Music, movies, podcasts, shows, whatever.
 No bullshit, just a good & simple app that plays media files.
 
 
+## Dogfooded as fuck
+
+I (Ky) needed a local media player so I made this. It's the only way I listen to my music, and watch most of my local video files!
+
+
 
 ## LLM Usage
 

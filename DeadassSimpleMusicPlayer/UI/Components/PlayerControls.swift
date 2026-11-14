@@ -25,6 +25,7 @@ private let playheadVerticalOffset: CGFloat = pixels(7)
 private let scrubBarHeight: CGFloat = pixels(4)
 /// How far above the scrub bar the user's finger must go to cancel a scrub gesture
 private let scrubCancelDistance: CGFloat = 100
+/// The assumed radius of the user's fingertip, in points
 private let scrubIndicatorFingertipClearance: CGFloat = 44
 
 
@@ -128,7 +129,12 @@ private extension PlayerControls {
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { scrubBarWidth = $0 }
                 
                 scrubBarForeground
-                    .overlay(alignment: .topLeading) {
+                    .overlay(alignment: .topLeft(in: layoutDirection)) {
+                        // `.topLeft`:
+                        // position calculations happen later so that we can tear off the playhead;
+                        // anchoring it to the top-left lets us calculate the position of the playhead just like we
+                        // calculate the length of the scrub bar foreground
+                        
                         playhead
                     }
             }
@@ -182,11 +188,12 @@ private extension PlayerControls {
     @ViewBuilder
     private var playhead: some View {
         if let scrubSession {
-            scrubIndicator(isCancelled: scrubSession.isCancelled)
-                .fixedSize()
-                // Pin the indicator by its bottom center, so "Cancel" appearing grows it upward
-                .alignmentGuide(.leading) { $0.width / 2 }
-//                .alignmentGuide(.top) { $0.height }
+            Color.clear
+                .frame(width: 0, height: 0)
+                .overlay(alignment: .top) {
+                    scrubIndicator(isCancelled: scrubSession.isCancelling)
+                        .fixedSize()
+                }
                 .offset(scrubIndicatorAnchor(for: scrubSession))
                 .allowsHitTesting(false)
                 .transition(
@@ -195,6 +202,7 @@ private extension PlayerControls {
                 )
         }
     }
+    
     
     func scrubIndicator(isCancelled: Bool) -> some View {
         VStack(spacing: pixels(5)) {
@@ -219,10 +227,10 @@ private extension PlayerControls {
     
     /// Where the bottom center of the scrub indicator goes, in the scrub bar's coordinate space
     func scrubIndicatorAnchor(for scrubSession: ScrubSession) -> CGSize {
-        if scrubSession.isCancelled {
+        if scrubSession.isCancelling {
             return CGSize(
                 width: scrubSession.fingerLocation.x,
-                height: scrubSession.fingerLocation.y - scrubIndicatorFingertipClearance)
+                height: scrubSession.fingerLocation.y - (playheadVerticalOffset + scrubIndicatorFingertipClearance + playheadHeight))
         }
         else {
             return CGSize(
@@ -265,6 +273,7 @@ private extension PlayerControls {
             .updating($scrubSession) { value, inoutScrubSession, transaction in
                 defer { inoutScrubSession?.phase = .ongoing }
                 transaction.animation = .bouncy
+                transaction.disablesAnimations = true
                 
                 let isCancelled = value.location.y < -scrubCancelDistance
                 
@@ -286,21 +295,10 @@ private extension PlayerControls {
                 inoutScrubSession?.currentPosition = currentPosition
                 inoutScrubSession?.fingerLocation = value.location
                 
-                guard let currentPosition else {
-                    performUserAction(.scrub(transaction: .init(
-                        id: _temp_scrubSession.id,
-                        startPosition: _temp_scrubSession.startPosition,
-                        currentPosition: .makeNoChange,
-                        wasPlayingAtStart: _temp_scrubSession.wasPlayingAtStart,
-                        phase: _temp_scrubSession.phase,
-                    )))
-                    return
-                }
-                
                 performUserAction(.scrub(transaction: .init(
                     id: _temp_scrubSession.id,
                     startPosition: _temp_scrubSession.startPosition,
-                    currentPosition: .setPlayhead(to: currentPosition),
+                    currentPosition: currentPosition.map { .setPlayhead(to: $0) } ?? .makeNoChange,
                     wasPlayingAtStart: _temp_scrubSession.wasPlayingAtStart,
                     phase: _temp_scrubSession.phase,
                 )))
@@ -632,7 +630,7 @@ private struct ScrubSession: Equatable, Identifiable {
 
 extension ScrubSession {
     /// Whether the finger is far enough above the scrub bar to cancel the scrub
-    var isCancelled: Bool { nil == currentPosition }
+    var isCancelling: Bool { nil == currentPosition }
 }
 
 
