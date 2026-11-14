@@ -104,3 +104,33 @@ The 2 remote handlers also get a guard that returns `.noActionableNowPlayingItem
 ### Checks
 
 `swiftc -parse` (Swift 6.2 for Linux) on `AVPlayer + playback state.swift` and `PlaybackEngine.swift`: the 2 files parse. I did not compile them against the Apple SDKs, and I did not test on a device.
+
+## 2026-11-13 — timestamps with hours (PR #85 feedback)
+
+**Model:** Claude Opus 5.5
+**Director:** Ky
+
+In my review of PR #85, I said that `Duration.mediaPositionTimestamp` shows minutes and seconds only, so an item of 1:23:45 shows `83:45`. Its doc comment gives `1:23:45` as an example. Ky told me to change the code so that it shows hours.
+
+I started from `ea1933c`. The patch changes only `Duration + stringification.swift`:
+
+- The function gets the whole seconds from `components.seconds` (an `Int64`). It does not use `timeInterval`. Thus the conversion has no `Double` to `Int` step that can stop the app.
+- If the value has 1 or more hours, the result is `H:MM:SS`. If not, the result is `M:SS`, the same as before. The digits after a colon always have 2 digits, with the same `.formatted(.number.precision(.integerLength(2)))` that the old code used.
+- Parts of a second are ignored, the same as before. Thus 83.9 s shows `1:23`.
+
+### Checks
+
+I compiled the changed file with the Swift 6.2 toolchain for Linux (`-swift-version 6 -warnings-as-errors`) and a small `main.swift` that is not part of the patch. The results:
+
+| Seconds | Result |
+|---|---|
+| 4 | `0:04` |
+| 83 | `1:23` |
+| 3272 | `54:32` |
+| 3599 | `59:59` |
+| 3600 | `1:00:00` |
+| 3605 | `1:00:05` |
+| 5025 | `1:23:45` |
+| 36000 | `10:00:00` |
+
+These are the examples in the doc comment, and the limits around 1 hour. I did not test a negative `Duration`. I did not compile against the Apple SDKs, and I did not test on a device.
