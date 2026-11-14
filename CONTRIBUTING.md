@@ -72,6 +72,7 @@ Use whatever tooling you want, but here's what this repo expects:
 - Xcode 26 or 27
 - Swift 6 in strict concurrency mode
 - iOS 26 or 27
+- macOS 26 or 27
 - iPhone 14 or newer
 
 Your changes should work well with all combinations of those.

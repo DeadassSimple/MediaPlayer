@@ -55,6 +55,9 @@ public final class PlaybackEngine {
     /// The duration of the loaded item, in seconds. `nil` while the duration is not known, and when no item is loaded.
     public private(set) var duration: TimeInterval? = nil
     
+    /// How frequently the engine should check for and report updates to the currently-playing item
+    public let updateFrequency: TimeInterval = 0.1
+    
     /// The cover art to show in the video area. `nil` when the loaded item has video, and when no item is loaded.
     public private(set) var artwork: NativeImage? = nil
     
@@ -123,7 +126,7 @@ public final class PlaybackEngine {
         
         // Keeps `currentTime` correct, and sends `Event.positionChanged(item:seconds:)` for the loaded item. This is here, not in a function, so that nothing else can add a second observer. `deinit` removes this one
         periodicTimeObserverToken = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.5, preferredTimescale: .commonMedia),
+            forInterval: CMTime(seconds: updateFrequency, preferredTimescale: .commonMedia),
             queue: .main
         ) { [weak self] time in
             guard let self else { return }
@@ -510,6 +513,7 @@ private extension PlaybackEngine {
         
         // Add handler for Play Command
         commandCenter.playCommand.addTarget { [player] _ in
+            guard nil != player.currentItem else { return .noActionableNowPlayingItem }
             guard player.isPaused else { return .commandFailed }
             player.playOrRestart()
             return .success
@@ -524,6 +528,8 @@ private extension PlaybackEngine {
         
         // Add handler for Toggle Play/Pause Command, which is what headphone buttons and many car head units send instead of the discrete commands above
         commandCenter.togglePlayPauseCommand.addTarget { [player] _ in
+            guard nil != player.currentItem else { return .noActionableNowPlayingItem }
+            
             if player.isPaused {
                 player.playOrRestart()
             }
@@ -619,6 +625,17 @@ private extension PlaybackEngine {
         }
         
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = player.rate
+    }
+}
+
+
+
+// MARK: - Conveniences
+
+public extension PlaybackEngine {
+    var currentTrackPosition: PlayheadPosition? {
+        guard let duration else { return nil }
+        return PlayheadPosition(current: currentTime, total: duration)
     }
 }
 

@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 
 import CollectionTools
 import CrossKitTypes
+import MonetizationTools
 import SimpleLogging
 import Howl
 
@@ -64,6 +65,13 @@ struct LibraryView: View {
     
     @State
     private var currentError: ToastError?
+    
+    
+    #if DEBUG
+    // MARK: Debugging
+    @State
+    private var debug_showMonetizationPrompt = Bool.random()
+    #endif
     
     
     
@@ -427,6 +435,8 @@ private extension LibraryView {
                     }
                 }
             }
+            
+            monetizationPrompt
         }
         
         .alert("Name this playlist", isPresented: $isNamingNewPlaylist) {
@@ -654,6 +664,73 @@ private extension LibraryView {
 
 
 
+// MARK: - Monetization prompt
+
+private extension LibraryView {
+    
+    @ViewBuilder
+    var monetizationPrompt: some View {
+            MonetizationPrompt(for: .tipJar) { monetizer in
+//                Section("Tip jar") {
+                VStack(alignment: .leading, spacing: 24) {
+                    Text("""
+                            This app is made by Ky, a solo indie dev.
+                            If you like it, you can leave a tip!
+                            """)
+                    
+                    Button("Tip Ky") { Task {
+                        do {
+                            try await monetizer.present()
+                        }
+                        catch {
+                            currentError = ToastError(
+                                errorDescription: "Payment failed",
+                                cause: error,
+                                systemImage: "xmark.octagon",
+                            )
+                        }
+                    } }
+                        .buttonStyle(.glassProminent)
+                        .buttonSizing(.flexible)
+                    
+                    HStack {
+                        Button(role: .close) {
+                            monetizer.snooze()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonBorderShape(.circle)
+                        Spacer()
+                        
+                        ConfirmationGatedButton("Don't ask me again", systemImage: nil, role: .destructive, confirmationMessage: "You'll never see this tip jar ever again", confirmationButtonTitle: "So long, tip jar!") {
+                            monetizer.decline()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    
+#if DEBUG
+                    Button("reset") { monetizer.reset() }
+                        .buttonStyle(.borderless)
+#endif
+                }
+//            }
+            }
+#if DEBUG
+            .debug(monetizationPrompt: .isShowing, $debug_showMonetizationPrompt)
+#endif
+            .buttonStyle(.borderless)
+            .monetizationPromptStyle(.plain)
+            
+#if DEBUG
+            if !debug_showMonetizationPrompt {
+                Button("Show monetization prompt") { debug_showMonetizationPrompt = true }
+            }
+#endif
+    }
+}
+
+
+
 // MARK: - Rows
 
 /// One queue slot: a now-playing indicator, the media's best-known name, and (when relevant) why it can't play.
@@ -849,4 +926,23 @@ private struct SavedPlaylistRow: View {
 
 #Preview("Empty") {
     LibraryView(session: PlayerSession(persisting: false))
+}
+
+#Preview("Playlists") {
+    LibraryView(session: PlayerSession.demo)
+        .playlistsTab
+        .onAppear {
+            Tips.showAllTipsForTesting()
+        }
+}
+
+#Preview("Monetization prompt") {
+    List {
+        LibraryView(session: PlayerSession.demo)
+            .monetizationPrompt
+            .onAppear {
+                Tips.showAllTipsForTesting()
+            }
+    }
+    .listStyle(.insetGrouped)
 }

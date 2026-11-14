@@ -222,6 +222,59 @@ public extension NowPlayingStore {
             // Otherwise the queue is finished, and the player rests at the end of the final file
         }
     }
+    
+    
+    /// Makes the next playable entry of the queue the current entry. Call this function when the user asks for the next item, for example with a "next track" button.
+    ///
+    /// When `repeatMode` is `.wholeQueue`, the move goes from the last entry to the first entry. With the other modes, the move does not occur at the end of the queue. If playback was on, playback continues on the new entry. If playback was paused, playback stays paused.
+    ///
+    /// - Returns: The new current entry, or `nil` when the current entry did not change
+    @discardableResult
+    func skipToNextEntry() -> PlaylistEntry? {
+        skipEntry { queue, wrapping in
+            queue.moveToNextEntry(wrapping: wrapping)
+        }
+    }
+    
+    
+    /// Makes the previous playable entry of the queue the current entry. Call this function when the user asks for the previous item, for example with a "previous track" button.
+    ///
+    /// When `repeatMode` is `.wholeQueue`, the move goes from the first entry to the last entry. With the other modes, the move does not occur at the start of the queue. If playback was on, playback continues on the new entry. If playback was paused, playback stays paused.
+    ///
+    /// - Returns: The new current entry, or `nil` when the current entry did not change
+    @discardableResult
+    func skipToPreviousEntry() -> PlaylistEntry? {
+        skipEntry { queue, wrapping in
+            queue.moveToPreviousEntry(wrapping: wrapping)
+        }
+    }
+}
+
+
+
+private extension NowPlayingStore {
+    
+    /// Moves the current entry of the queue for a skip that the user asked for, and keeps playback on if it was on.
+    ///
+    /// The 2 skip functions use this function. Thus the 2 directions always use the same rules.
+    ///
+    /// - Parameter move: Moves the current entry of the given queue in 1 direction. Its second parameter is `true` when the move can go around the end of the queue. It returns the new current entry, or `nil` when the current entry did not change.
+    /// - Returns: The value that `move` returns
+    func skipEntry(_ move: (inout Playlist, _ wrapping: Bool) -> PlaylistEntry?) -> PlaylistEntry? {
+        // Read before the move, because the move loads a different item into the engine
+        let wasPlaying = engine.isPlaying
+        
+        // Wrapping follows the same rule as `advanceAfterCurrentItemFinished()`: only a whole-queue repeat goes around the end
+        let newEntry = move(&queue, .wholeQueue == repeatMode)
+        
+        if nil != newEntry,
+           wasPlaying
+        {
+            engine.play()
+        }
+        
+        return newEntry
+    }
 }
 
 

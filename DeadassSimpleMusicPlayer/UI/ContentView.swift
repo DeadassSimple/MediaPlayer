@@ -7,7 +7,20 @@
 
 import SwiftUI
 
+import BasicMathTools
 import SimpleLogging
+
+
+
+/// The current item must be longer than this for the player controls to show the skip-time buttons. An item of this length or shorter gets the skip-track buttons.
+///
+/// A constant for now. Ky plans to make this a setting.
+private let skipTimeMinimumDuration: TimeInterval = 10 * 60
+
+/// How far each skip-time button moves the playhead.
+///
+/// A constant for now. Ky plans to make this a setting.
+private let skipTimeIncrement: PlayerAction.SkipIncrement = .seconds(10)
 
 
 
@@ -29,6 +42,10 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             CustomMediaPlayer(session: session)
+            
+                .playerControls(configuration: controlsConfiguration) { [session] action in
+                    await session.perform(action)
+                }
             
                 .toolbar {
                     ToolbarItemGroup {
@@ -84,6 +101,39 @@ struct ContentView: View {
             if .active != newPhase {
                 session.nowPlaying.saveSnapshotNow()
             }
+        }
+    }
+}
+
+
+
+// MARK: - Player controls
+
+private extension ContentView {
+    
+    /// What the player controls show. This value shows the state of the engine of `session`. Thus the controls agree with the player also when the change comes from outside the app, for example a pause from Control Center.
+    var controlsConfiguration: PlayerControlsConfiguration {
+        PlayerControlsConfiguration(
+            updateFrequency: session.engine.updateFrequency,
+            isPlaying: session.engine.isPlaying,
+            currentTrackPosition: session.engine.currentTrackPosition,
+            backForwardKind: backForwardKind)
+    }
+    
+    
+    /// Which back/forward buttons the player controls show for the current item: the skip-time buttons when the item is longer than `skipTimeMinimumDuration`, and the skip-track buttons when it is not.
+    ///
+    /// `nil` while the engine does not know the duration of the current item. The player controls then show no back/forward buttons.
+    var backForwardKind: PlayerControlsConfiguration.BackForwardKind? {
+        guard let duration = session.engine.duration else {
+            return nil
+        }
+        
+        if skipTimeMinimumDuration < duration {
+            return .skipTime(forwardIncrement: skipTimeIncrement, backwardIncrement: skipTimeIncrement)
+        }
+        else {
+            return .skipTrack
         }
     }
 }

@@ -13,6 +13,14 @@ import SimpleLogging
 
 
 
+/// How long to let a track play before the "previous track" button becomes a "restart this track" button.
+///
+/// When playing a track, tapping the ⏮️ button returns the playhead to the start of the track. Tapping it again brings it to the start of the previous track.
+/// This value tells the player how far into the track one must be for that to be the behavior. Before this number of seconds, it skips to the previous track. After this number of seconds, it returns to the start of this track.
+private let skipBackThreshold: TimeInterval = 1.5
+
+
+
 /// Connects the playback engine with the queue, the history and the saved playlists. To play media, a view must have only this object.
 ///
 /// Make 1 session, and keep it for the life of the app. Give it to `CustomMediaPlayer` to show its media. To use 1 part directly, use these properties:
@@ -300,6 +308,87 @@ private extension PlayerSession {
         
         historyRecordedEntryID = entry.id
         history.record(entry.reference, displayName: displayName(for: entry))
+    }
+}
+
+
+
+public extension PlayerSession {
+    
+    /// Changes playback for 1 action that the user did in the player controls.
+    ///
+    /// Call this function from the `onUserAction` closure of `playerControls(configuration:onUserAction:)`.
+    ///
+    /// - Parameter action: The action that the user did
+    func perform(_ action: PlayerAction) {
+        switch action {
+        case .play:
+            engine.play()
+            
+        case .pause:
+            engine.pause()
+            
+        case .previousTrack:
+            if engine.currentTime < skipBackThreshold {
+                nowPlaying.skipToPreviousEntry()
+            }
+            else {
+                engine.seek(to: .zero)
+            }
+            
+        case .nextTrack:
+            nowPlaying.skipToNextEntry()
+            
+        case .skipBackward(increment: let increment):
+            // `currentTime` can be up to 1 interval of the periodic time observer behind the player during playback
+            seekWithinCurrentItem(to: engine.currentTime - (increment / .seconds(1)))
+            
+        case .skipForward(increment: let increment):
+            seekWithinCurrentItem(to: engine.currentTime + (increment / .seconds(1)))
+            
+        case .reverse(transaction: let transaction),
+                .fastForward(transaction: let transaction),
+                .scrub(transaction: let transaction):
+            
+//        todo: distinguish preview from done
+            
+            switch transaction.phase {
+            case .starting:
+                engine.pause()
+                
+            case .ongoing:
+                break
+                
+            case .complete:
+                if transaction.wasPlayingAtStart {
+                    engine.play()
+                }
+            }
+            
+            // A `TransportTransaction` has positions and no rate, so the controls calculate the position, and `perform(_:)` only moves the playhead to that position
+            switch transaction.currentPosition {
+            case .setPlayhead(to: let newTime):
+                seekWithinCurrentItem(to: newTime.timeInterval)
+                
+            case.makeNoChange:
+                seekWithinCurrentItem(to: transaction.startPosition.timeInterval)
+            }
+        }
+    }
+    
+    
+    /// Moves the playhead of the engine to `seconds`, but not before the start of the loaded item, and not after its end.
+    ///
+    /// When the duration of the item is not known, the start of the item is the only limit.
+    ///
+    /// - Parameter seconds: The new position, in seconds from the start of the loaded item
+    func seekWithinCurrentItem(to seconds: TimeInterval) {
+        guard seconds.isFinite else {
+            log(error: "Ignored a seek to a position which is not a finite number: \(seconds)")
+            return
+        }
+        
+        engine.seek(to: seconds.clamped(within: 0 ... (engine.duration ?? .infinity)))
     }
 }
 
