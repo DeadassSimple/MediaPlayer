@@ -1,5 +1,5 @@
 {
-  "originHash" : "bd72aaa8ca0bbeb9ae3eedf2c011f9e510c748c0b45588ae3ae48679fc6add67",
+  "originHash" : "fb80a0536440bcf985d8cdf8703a913b640a19794c47109f0c9389e77a2ec571",
   "pins" : [
     {
       "identity" : "howl",
@@ -65,6 +65,15 @@
       }
     },
     {
+      "identity" : "swift-essentiallyastring",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/KyNorthstar/Swift-EssentiallyAString.git",
+      "state" : {
+        "revision" : "b7b69d70a021629f7ebdb15d5628b992a63373b6",
+        "version" : "1.0.1"
+      }
+    },
+    {
       "identity" : "swift-function-tools",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RougeWare/Swift-Function-Tools.git",
@@ -74,12 +83,30 @@
       }
     },
     {
+      "identity" : "swift-introspection",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RougeWare/Swift-Introspection.git",
+      "state" : {
+        "revision" : "708ffefee5553616eb4e4ca9bc54b6baa1d50fb1",
+        "version" : "3.0.0"
+      }
+    },
+    {
       "identity" : "swift-lazy-containers",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RougeWare/Swift-Lazy-Containers.git",
       "state" : {
         "revision" : "360a35c98992fc53739e884fb0c48e988710fa92",
         "version" : "4.1.0"
+      }
+    },
+    {
+      "identity" : "swift-monetizationtools",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RougeWare/Swift-MonetizationTools.git",
+      "state" : {
+        "revision" : "f22d3564f5126dc4b713c4dde528f9f070ff2125",
+        "version" : "0.0.4"
       }
     },
     {
@@ -137,6 +164,24 @@
       }
     },
     {
+      "identity" : "swift-semver",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RougeWare/Swift-SemVer.git",
+      "state" : {
+        "revision" : "2bb7f8e77c4f0ed16056ce15dbce89fd0a500748",
+        "version" : "3.0.0-Beta.6"
+      }
+    },
+    {
+      "identity" : "swift-serializationtools",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RougeWare/Swift-SerializationTools.git",
+      "state" : {
+        "revision" : "4d151e1513b04da2ddc9fe464352e4070f7d992f",
+        "version" : "1.1.1"
+      }
+    },
+    {
       "identity" : "swift-simple-logging",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RougeWare/Swift-Simple-Logging",
@@ -152,6 +197,15 @@
       "state" : {
         "revision" : "7a82d5b07b72aed848b028d3e8bf6d9591ec108a",
         "version" : "1.2.0"
+      }
+    },
+    {
+      "identity" : "swift-string-integer-access",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RougeWare/Swift-String-Integer-Access.git",
+      "state" : {
+        "revision" : "595374e76274a7e951ba183fdd7f443801091d14",
+        "version" : "2.1.0"
       }
     }
   ],

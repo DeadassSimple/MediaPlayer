@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 
 import CollectionTools
 import CrossKitTypes
+import MonetizationTools
 import SimpleLogging
 import Howl
 
@@ -66,6 +67,13 @@ struct LibraryView: View {
     private var currentError: ToastError?
     
     
+    #if DEBUG
+    // MARK: Debugging
+    @State
+    private var debug_showMonetizationPrompt = Bool.random()
+    #endif
+    
+    
     
     
     
@@ -116,7 +124,7 @@ struct LibraryView: View {
                             "Clear history", systemImage: "trash",
                             confirmationMessage: "Clear all play history?")
                         {
-                            session.clearHistory()
+                            session.history.clear()
                         }
                     }
                 }
@@ -155,13 +163,13 @@ private extension LibraryView {
     
     /// The now-playing queue, in the order the user is actually hearing it: the shuffled order while shuffled, the user-specified order otherwise
     var orderedEntries: [PlaylistEntry] {
-        session.queue.effectiveOrder.compactMap(session.queue.entry(withID:))
+        session.nowPlaying.queue.effectiveOrder.compactMap(session.nowPlaying.queue.entry(withID:))
     }
     
     
     @ViewBuilder
     var queueTab: some View {
-        if session.queue.entries.isEmpty {
+        if session.nowPlaying.queue.entries.isEmpty {
             ContentUnavailableView(
                 "Nothing queued",
                 systemImage: "music.note.list",
@@ -172,28 +180,28 @@ private extension LibraryView {
                 Section {
                     ForEach(orderedEntries) { entry in
                         Button {
-                            session.play(entryWithID: entry.id) // Harmlessly no-ops for the already-current entry
+                            session.nowPlaying.play(entryWithID: entry.id) // For the already-current entry, just makes sure it's playing
                         } label: {
-                            QueueEntryRow(entry: entry, isCurrent: entry.id == session.queue.currentEntry?.id)
+                            QueueEntryRow(entry: entry, isCurrent: entry.id == session.nowPlaying.queue.currentEntry?.id)
                         }
                         .buttonStyle(.plain)
                         .disabled(!entry.isPlayable)
                     }
                     .onMove { source, destination in
-                        session.queue.moveEntries(fromEffectiveOffsets: source, toEffectiveOffset: destination)
+                        session.nowPlaying.queue.moveEntries(fromEffectiveOffsets: source, toEffectiveOffset: destination)
                     }
                     .onDelete { offsets in
                         // IDs gathered before any removal, since each removal shifts the offsets they were gathered from
                         let ids = offsets.map { orderedEntries[$0].id }
                         for id in ids {
-                            session.queue.remove(entryWithID: id)
+                            session.nowPlaying.queue.remove(entryWithID: id)
                         }
                     }
                 } header: {
                     TipView(RepeatButtonTip(), arrowEdge: .top, anchorID: Self.repeatModeButtonAnchorId)
                         .listRowBackground(EmptyView())
                 } footer: {
-                    if session.queue.isShuffled {
+                    if session.nowPlaying.queue.isShuffled {
                         Text("Shuffling is temporary! You can reorder songs, but they'll be returned to the same unshuffled order when you unshuffle.")
                     }
                 }
@@ -201,7 +209,7 @@ private extension LibraryView {
                 
                 Section {
                     ConfirmationGatedButton("Clear queue", confirmationMessage: "Remove everything from the Now Playing queue?") {
-                        session.queue.removeAll()
+                        session.nowPlaying.queue.removeAll()
                     }
                 } footer: {
                     VStack {
@@ -215,13 +223,13 @@ private extension LibraryView {
     
     var shuffleToggle: some View {
         Toggle("Shuffle", systemImage: "shuffle", isOn: Binding(
-            get: { session.queue.isShuffled },
+            get: { session.nowPlaying.queue.isShuffled },
             set: { shouldShuffle in
                 if shouldShuffle {
-                    session.queue.shuffle()
+                    session.nowPlaying.queue.shuffle()
                 }
                 else {
-                    session.queue.unshuffle()
+                    session.nowPlaying.queue.unshuffle()
                 }
             })
         )
@@ -232,9 +240,9 @@ private extension LibraryView {
     var repeatModeMenu: some View {
         Menu {
             Picker("Repeat", selection: Binding(
-                get: { session.repeatMode },
+                get: { session.nowPlaying.repeatMode },
                 set: { newMode in
-                    session.repeatMode = newMode
+                    session.nowPlaying.repeatMode = newMode
                     RepeatButtonTip.didOpenRepeatMenu.sendDonation()
                 }
             )) {
@@ -244,7 +252,7 @@ private extension LibraryView {
                 }
             }
         } label: {
-            Image(systemName: session.repeatMode.systemImageName_preview)
+            Image(systemName: session.nowPlaying.repeatMode.systemImageName_preview)
                 .tipAnchor(Self.repeatModeButtonAnchorId)
                 
                 // What follows ain't ideal by any means. I wanna style this like a toggle, where it looks like the
@@ -255,7 +263,7 @@ private extension LibraryView {
                 // – Ky, 2026-07-14
                 .foregroundStyle(
                     { () -> Color in
-                        switch session.repeatMode {
+                        switch session.nowPlaying.repeatMode {
                         case .off: Color.primary
                         case .currentItem, .wholeQueue: Color.accentColor
                         }
@@ -263,7 +271,7 @@ private extension LibraryView {
                 )
                 .font(
                     { () -> Font? in
-                        switch session.repeatMode {
+                        switch session.nowPlaying.repeatMode {
                         case .off: nil
                         case .currentItem, .wholeQueue: .title
                         }
@@ -272,14 +280,14 @@ private extension LibraryView {
                 .padding(
                     .horizontal,
                     { () -> CGFloat? in
-                        switch session.repeatMode {
+                        switch session.nowPlaying.repeatMode {
                         case .off: 6.5
                         case .currentItem, .wholeQueue: 0
                         }
                     }()
                 )
         } primaryAction: {
-            session.repeatMode.cycleNext()
+            session.nowPlaying.repeatMode.cycleNext()
             RepeatButtonTip.repeatModeCycles.sendDonation()
         }
     }
@@ -359,19 +367,19 @@ private extension LibraryView {
                 Button("Save Now Playing queue as playlist…", systemImage: "plus") {
                     isNamingNewPlaylist = true
                 }
-                .disabled(session.queue.entries.isEmpty)
+                .disabled(session.nowPlaying.queue.entries.isEmpty)
                 
                 Button("Import a playlist…", systemImage: "square.and.arrow.down") {
                     isImportingPlaylist = true
                 }
             }
             
-            if !session.savedPlaylists.isEmpty {
+            if !session.library.savedPlaylists.isEmpty {
                 Section("Saved") {
-                    ForEach(session.savedPlaylists) { playlist in
+                    ForEach(session.library.savedPlaylists) { playlist in
                         Button {
                             Task {
-                                await session.loadIntoQueue(playlist)
+                                await session.nowPlaying.loadIntoQueue(playlist)
                                 dismiss() // Their goal (play that playlist) is accomplished; get out of the way
                             }
                         } label: {
@@ -409,10 +417,10 @@ private extension LibraryView {
                     }
                     .onDelete { offsets in
                         // IDs gathered before any removal, since each removal shifts the offsets they were gathered from
-                        let ids = offsets.map { session.savedPlaylists[$0].id }
+                        let ids = offsets.map { session.library.savedPlaylists[$0].id }
                         for id in ids {
                             do {
-                                try session.delete(playlistWithID: id)
+                                try session.library.delete(playlistWithID: id)
                             }
                             catch {
                                 log(error: "Couldn't delete the saved playlist document “\(id)”: \(error)")
@@ -427,6 +435,8 @@ private extension LibraryView {
                     }
                 }
             }
+            
+            monetizationPrompt
         }
         
         .alert("Name this playlist", isPresented: $isNamingNewPlaylist) {
@@ -498,7 +508,7 @@ private extension LibraryView {
                 let data = try Data(contentsOf: url)
                 
                 if "json" == url.pathExtension.lowercased() {
-                    session.importPlaylist(fromExportedJSON: data)
+                    session.library.importPlaylist(fromExportedJSON: data)
                 }
                 else {
                     guard let (_, failedTrackImportCount) = session.importPlaylist(fromM3U8: data, suggestedName: url.deletingPathExtension().lastPathComponent)
@@ -567,7 +577,7 @@ private extension LibraryView {
                 ForEach(session.history.entries) { historyEntry in
                     Button {
                         Task {
-                            await session.replay(historyEntry)
+                            await session.nowPlaying.replay(historyEntry)
                             dismiss()
                         }
                     } label: {
@@ -598,11 +608,10 @@ private extension LibraryView {
     
     /// Chooses how far back history is kept. Tightening the window prunes immediately.
     var retentionMenu: some View {
-        Menu(currentRetentionTitle, systemImage: "timer") {
-            Picker("Keep History", selection: Binding(
-                get: { session.history.retention },
-                set: { session.setHistoryRetention($0) })
-            ) {
+        @Bindable var history = session.history
+        
+        return Menu(currentRetentionTitle, systemImage: "timer") {
+            Picker("Keep History", selection: $history.retention) {
                 ForEach(RetentionPreset.allCases, id: \.self) { preset in
                     Text(preset.title)
                         .tag(preset.retention)
@@ -650,6 +659,73 @@ private extension LibraryView {
             case .hundredMostRecent: "Only remember 100 recent plays"
             }
         }
+    }
+}
+
+
+
+// MARK: - Monetization prompt
+
+private extension LibraryView {
+    
+    @ViewBuilder
+    var monetizationPrompt: some View {
+            MonetizationPrompt(for: .tipJar) { monetizer in
+//                Section("Tip jar") {
+                VStack(alignment: .leading, spacing: 24) {
+                    Text("""
+                            This app is made by Ky, a solo indie dev.
+                            If you like it, you can leave a tip!
+                            """)
+                    
+                    Button("Tip Ky") { Task {
+                        do {
+                            try await monetizer.present()
+                        }
+                        catch {
+                            currentError = ToastError(
+                                errorDescription: "Payment failed",
+                                cause: error,
+                                systemImage: "xmark.octagon",
+                            )
+                        }
+                    } }
+                        .buttonStyle(.glassProminent)
+                        .buttonSizing(.flexible)
+                    
+                    HStack {
+                        Button(role: .close) {
+                            monetizer.snooze()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonBorderShape(.circle)
+                        Spacer()
+                        
+                        ConfirmationGatedButton("Don't ask me again", systemImage: nil, role: .destructive, confirmationMessage: "You'll never see this tip jar ever again", confirmationButtonTitle: "So long, tip jar!") {
+                            monetizer.decline()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    
+#if DEBUG
+                    Button("reset") { monetizer.reset() }
+                        .buttonStyle(.borderless)
+#endif
+                }
+//            }
+            }
+#if DEBUG
+            .debug(monetizationPrompt: .isShowing, $debug_showMonetizationPrompt)
+#endif
+            .buttonStyle(.borderless)
+            .monetizationPromptStyle(.plain)
+            
+#if DEBUG
+            if !debug_showMonetizationPrompt {
+                Button("Show monetization prompt") { debug_showMonetizationPrompt = true }
+            }
+#endif
     }
 }
 
@@ -839,39 +915,6 @@ private struct SavedPlaylistRow: View {
 
 
 
-// MARK: - Sugar
-
-private extension RepeatMode {
-    
-    var displayName: LocalizedStringKey {
-        switch self {
-        case .off:         "Don't loop"
-        case .wholeQueue:  "Loop all"
-        case .currentItem: "Loop one"
-        }
-    }
-    
-    
-    var systemImageName_menuItem: String {
-        switch self {
-        case .off:         "forward.end"
-        case .wholeQueue:  "repeat"
-        case .currentItem: "repeat.1"
-        }
-    }
-    
-    
-    var systemImageName_preview: String {
-        switch self {
-        case .off:         "repeat"
-        case .wholeQueue:  "repeat.circle.fill"
-        case .currentItem: "repeat.1.circle.fill"
-        }
-    }
-}
-
-
-
 // MARK: - Previews
 
 #Preview("Populated") {
@@ -883,4 +926,23 @@ private extension RepeatMode {
 
 #Preview("Empty") {
     LibraryView(session: PlayerSession(persisting: false))
+}
+
+#Preview("Playlists") {
+    LibraryView(session: PlayerSession.demo)
+        .playlistsTab
+        .onAppear {
+            Tips.showAllTipsForTesting()
+        }
+}
+
+#Preview("Monetization prompt") {
+    List {
+        LibraryView(session: PlayerSession.demo)
+            .monetizationPrompt
+            .onAppear {
+                Tips.showAllTipsForTesting()
+            }
+    }
+    .listStyle(.insetGrouped)
 }

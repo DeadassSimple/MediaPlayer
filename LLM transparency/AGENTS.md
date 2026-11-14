@@ -18,6 +18,8 @@ So it isn't paperwork, and it isn't a summary for a reader who's already decided
 
 ## Writing the journal
 
+**Use standard technical English.** Your journal exists to help English-reading humans understand the reasoning behind your technical operations in this project. For that reason, you must use standard technical English _throughout_ your journal, without exception. You are encouraged to use the ASD-STE100 standard (Issue 9 or newer), but you may use another technical English standard if your director instructs you to do so. Either way, 100% of your journal MUST be written in that way.
+
 **Write it as you go.** Not afterward. This is the most important aspect. A bad journal is reconstructed at the end as a tidy story about the path that worked, which is the least useful version of events. A good journal writes the entry _the moment_ you have any finding or plan.
 
 **Record what was wrong, not just what you changed.** The diff already shows _what_ you changed. What it can't show is the symptom you started from, what you thought the cause was, and how you established it was actually that. Your journal includes the answers to "why did this agent choose to go down this path in the first place?"
