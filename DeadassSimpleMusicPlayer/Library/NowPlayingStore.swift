@@ -32,6 +32,7 @@ public final class NowPlayingStore {
     public var queue: Playlist = .empty {
         didSet {
             guard !isRestoring else { return }
+            queueChangeCount &+= 1
             scheduleSnapshotSave(within: Self.structuralSaveDebounce)
             
             let previousItem = oldValue.currentEntry?.mediaItem
@@ -64,6 +65,14 @@ public final class NowPlayingStore {
     /// `true` only while `load()` sets the restored values. Thus the `didSet` observers do not save or load again what `load()` sets directly.
     @ObservationIgnored
     private var isRestoring = false
+    
+    /// Increases by 1 with each change to `queue`, but not with the change that restores the previous session. `load()` compares this value before and after it reads the previous session. Thus it finds a change that the user made in that time
+    @ObservationIgnored
+    private var queueChangeCount: UInt = 0
+    
+    /// The newest call of `replay(_:)` or `loadIntoQueue(_:andPlay:)`, or `nil` before the first call. Each call finds its files, and then changes the queue only if no newer call started in that time. Thus the request that the user made last wins, also when an older request takes more time
+    @ObservationIgnored
+    private var newestPlayRequestID: UUID? = nil
     
     /// The scheduled snapshot save, or `nil` when no save is scheduled
     @ObservationIgnored
@@ -100,6 +109,10 @@ public extension NowPlayingStore {
     func load() async {
         guard let documentStore else { return } // Expected when this store runs memory-only, so there is nothing to report
         
+        // The user can change the queue or the repeat mode while the previous session loads. Those changes are newer than the previous session, so they win
+        let queueChangeCountBeforeRestore = queueChangeCount
+        let repeatModeBeforeRestore = repeatMode
+        
         // All the slow, suspending work happens into locals first; assignment at the bottom is synchronous, so the `isRestoring` gate can't accidentally swallow a save for some unrelated mutation which interleaves with a suspension here
         
         var restoredQueue: Playlist? = nil
@@ -121,7 +134,12 @@ public extension NowPlayingStore {
         isRestoring = true
         defer { isRestoring = false }
         
-        if let restoredQueue {
+        if nil != restoredQueue,
+           queueChangeCountBeforeRestore != queueChangeCount
+        {
+            log(info: "The queue changed while the previous session loaded, so the previous session's queue was not restored")
+        }
+        else if let restoredQueue {
             queue = restoredQueue
             playbackPositionSeconds = restoredPositionSeconds
             
@@ -131,7 +149,9 @@ public extension NowPlayingStore {
             engine.load(restoredQueue.currentEntry?.mediaItem, resumingAt: restoredPositionSeconds, autoplay: false)
         }
         
-        if let restoredRepeatMode {
+        if let restoredRepeatMode,
+           repeatModeBeforeRestore == repeatMode
+        {
             repeatMode = restoredRepeatMode
         }
     }
@@ -160,9 +180,16 @@ public extension NowPlayingStore {
     ///
     /// A history entry contains only a reference to its file, so this function must find the file again. When the file moved or was deleted, this function logs the error and does nothing more.
     func replay(_ historyEntry: PlaybackHistory.Entry) async {
+        let requestID = UUID()
+        newestPlayRequestID = requestID
+        
         guard let item = await MediaItem(resolving: historyEntry.reference) else {
             log(error: "Couldn't reopen “\(historyEntry.displayName)” from history — the file may have moved or been deleted")
             return
+        }
+        
+        guard requestID == newestPlayRequestID else {
+            return // The user asked for something newer while this file loaded
         }
         
         let entry = PlaylistEntry(item)
@@ -181,11 +208,18 @@ public extension NowPlayingStore {
     ///   - playlist: The saved playlist to load
     ///   - andPlay:  `true` starts playback after the load. Defaults to `true`.
     func loadIntoQueue(_ playlist: SavedPlaylist, andPlay: Bool = true) async {
+        let requestID = UUID()
+        newestPlayRequestID = requestID
+        
         var entries: [PlaylistEntry] = []
         entries.reserveCapacity(playlist.items.count)
         
         for reference in playlist.items {
             entries.append(await .resolving(reference))
+        }
+        
+        guard requestID == newestPlayRequestID else {
+            return // The user asked for something newer while these files loaded
         }
         
         queue = Playlist(entries: entries)

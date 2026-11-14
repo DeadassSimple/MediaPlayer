@@ -305,6 +305,8 @@ public extension PlaybackEngine {
                 guard .readyToPlay == item.status else { return }
                 
                 Task { @MainActor in
+                    guard item === player.currentItem else { return } // A different item loaded while this task waited for the main actor, and this position is not for that item
+                    
                     log(info: "Item is ready; applying the restored playback position")
                     let seekFinished = await player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
                     log(info: "Restored-position seek \(seekFinished ? "completed" : "was interrupted by another seek")")

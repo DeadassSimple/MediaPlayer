@@ -39,6 +39,10 @@ struct ContentView: View {
     @State
     private var session = PlayerSession()
     
+    /// The newest folder import, or `nil` before the first one. Each import waits for the import before it, and then adds its entries to the queue
+    @State
+    private var newestFolderImport: Task<Void, Never>? = nil
+    
     var body: some View {
         NavigationStack {
             CustomMediaPlayer(session: session)
@@ -74,10 +78,12 @@ struct ContentView: View {
                 .fileImporter(isPresented: $showFileBrowser, allowedContentTypes: .init(Playlist.defaultAllowedContentTypes)) { result in
                     switch result {
                     case .success(let openedUrl):
-                        Task {
+                        let previousImport = newestFolderImport
+                        newestFolderImport = Task {
                             let newEntries = await session.withLoadingMessage("Loading folder…") {
                                 await Playlist.entries(fromUrl: openedUrl, allowRecursion: true)
                             }
+                            await previousImport?.value // Folders load at the same time, but go into the queue in the sequence that the user picked them
                             session.nowPlaying.queue.append(contentsOf: newEntries)
                             
                             // A quiet background courtesy, after the music's already going: files sharing album metadata become an album playlist

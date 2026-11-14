@@ -44,8 +44,13 @@ public final class PlayerSession {
     
     /// A message that tells the user what loads at this time (for example, the previous session, or a folder), or `nil` when nothing loads.
     ///
-    /// While this message is not `nil`, the player screen shows it and not the empty state. To show a message during a long operation, use `withLoadingMessage(_:perform:)`. Do not set this property directly. The function puts back the previous message after the operation. Thus 2 operations at the same time do not erase the message of each other.
-    public private(set) var loadingMessage: LocalizedStringResource? = nil
+    /// While this message is not `nil`, the player screen shows it and not the empty state. To show a message during a long operation, use `withLoadingMessage(_:perform:)`. When 2 or more operations run at the same time, this is the message of the operation that started last.
+    public var loadingMessage: LocalizedStringResource? {
+        activeLoadingMessages.last?.message
+    }
+    
+    /// The message of each operation that runs in `withLoadingMessage(_:perform:)` at this time, in the sequence that the operations started
+    private var activeLoadingMessages: [(id: UUID, message: LocalizedStringResource)] = []
     
     /// Plays the item of the current entry
     public let engine: PlaybackEngine
@@ -118,7 +123,7 @@ public extension PlayerSession {
         guard !hasRestored else { return }
         hasRestored = true
         
-        loadingMessage = [
+        let message: LocalizedStringResource = [
             // By people:
             "Reticulating splines…",
             "Gimme sec…",
@@ -218,11 +223,12 @@ public extension PlayerSession {
             "Touching grass…",
             "Turning it off and on again…",
         ].randomElement() ?? "Loading..."
-        defer { loadingMessage = nil }
         
-        await nowPlaying.load()
-        history.load()
-        library.load()
+        await withLoadingMessage(message) {
+            await nowPlaying.load()
+            history.load()
+            library.load()
+        }
     }
 }
 
@@ -232,9 +238,9 @@ public extension PlayerSession {
 
 public extension PlayerSession {
     
-    /// Shows `message` as `loadingMessage` while `work` runs. When `work` is complete, this function puts back the message that was there before, which is not always `nil`.
+    /// Shows `message` as `loadingMessage` while `work` runs. When `work` is complete, `loadingMessage` shows the message of the newest operation that still runs, or `nil` when no operation runs.
     /// 
-    /// Thus 2 operations can run at the same time, and the operation that completes first does not erase the message of the other. For example, a short folder import can complete while the restore of the previous session continues.
+    /// Thus 2 operations can run at the same time, and they can complete in any sequence. The operation that completes first does not erase the message of the other, and the message of an operation that is complete does not show again. For example, a short folder import can complete while the restore of the previous session continues.
     ///
     /// - Parameters:
     ///   - message: The message to show while `work` runs
@@ -242,9 +248,9 @@ public extension PlayerSession {
     ///
     /// - Returns: The value that `work` returns
     func withLoadingMessage<T>(_ message: LocalizedStringResource, perform work: () async -> T) async -> T {
-        let previousMessage = loadingMessage
-        loadingMessage = message
-        defer { loadingMessage = previousMessage }
+        let id = UUID()
+        activeLoadingMessages.append((id: id, message: message))
+        defer { activeLoadingMessages.removeAll { id == $0.id } }
         return await work()
     }
 }

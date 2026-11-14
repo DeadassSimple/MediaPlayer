@@ -49,8 +49,13 @@ private struct PlayerControls: View {
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
     
+    /// The number of user actions that were sent and are not complete
     @State
-    private var disabled: Bool = false
+    private var pendingUserActionCount = 0
+    
+    /// The newest user action, or `nil` before the first one. Each action waits for the action before it. Thus `onUserAction` gets the actions 1 at a time, in the sequence that the user did them
+    @State
+    private var newestUserAction: Task<Void, Never>? = nil
     
     @State
     private var screenCornerRadii: RectangleCornerRadii = Introspection.Device.current.dimensions.displayCornerRadii
@@ -94,10 +99,21 @@ private struct PlayerControls: View {
     
     
     
+    /// `true` while a user action is not complete
+    private var disabled: Bool {
+        0 < pendingUserActionCount
+    }
+    
+    
     private func performUserAction(_ action: PlayerAction) {
-        Task { @UserActionQueue in
-            await MainActor.run { disabled = true }
-            defer { await MainActor.run { disabled = false } }
+        pendingUserActionCount += 1
+        
+        let previousAction = newestUserAction
+        newestUserAction = Task { @MainActor in
+            defer { pendingUserActionCount -= 1 }
+            
+            // An actor cannot do this: while 1 task waits at an `await`, the actor starts other tasks
+            await previousAction?.value
             await onUserAction(action)
         }
     }
@@ -106,14 +122,6 @@ private struct PlayerControls: View {
     
     typealias Configuration = PlayerControlsConfiguration
     typealias OnUserAction = PlayerAction.OnUserAction
-}
-
-
-
-@globalActor
-final actor UserActionQueue: GlobalActor {
-    public static let shared = ActorType()
-    public typealias ActorType = UserActionQueue
 }
 
 

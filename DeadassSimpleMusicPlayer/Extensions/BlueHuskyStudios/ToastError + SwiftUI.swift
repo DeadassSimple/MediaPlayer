@@ -74,6 +74,7 @@ private struct ShowToastWithItemShim<Item: Identifiable>: ViewModifier {
                 showToast = false
                 if nil != newValue {
                     Task {
+                        guard newValue == item?.id else { return } // The item changed again before this task ran, and the newer change decides
                         showToast = true
                     }
                 }

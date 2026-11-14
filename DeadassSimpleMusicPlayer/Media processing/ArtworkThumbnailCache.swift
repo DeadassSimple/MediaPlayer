@@ -28,6 +28,9 @@ public actor ArtworkThumbnailCache {
     /// Files already looked at, whether or not they turned out to have art. This is what stops art-less files from being retried forever.
     private var alreadyAttempted: Set<MediaReference> = []
     
+    /// The reads that run at this time. A second request for a file that is being read waits for that read. Without this, the second request finds the file in `alreadyAttempted` and returns `nil` before the read is complete.
+    private var readsInProgress: [MediaReference: Task<NativeImage?, Never>] = [:]
+    
     /// The longest side, in pixels, of a thumbnail this cache produces.
     ///
     /// Expressed in pixels rather than points on purpose: this type has no business reaching for the screen it'll be drawn on, and over-decoding slightly is harmless at this size.
@@ -57,6 +60,10 @@ public actor ArtworkThumbnailCache {
             return alreadyLoaded
         }
         
+        if let readInProgress = readsInProgress[reference] {
+            return await readInProgress.value // A different row asked for this file first, and its read is not complete
+        }
+        
         guard !alreadyAttempted.contains(reference) else {
             return nil // Looked at before and found nothing
         }
@@ -64,9 +71,21 @@ public actor ArtworkThumbnailCache {
         // Safe to check and then insert as two steps rather than one: there's no `await` between them, so actor isolation guarantees no other call can slip in and claim this same file partway through
         alreadyAttempted.insert(reference)
         
-        guard let thumbnail = await read(reference) else {
+        let readTask = Task { await self.read(reference) }
+        readsInProgress[reference] = readTask
+        
+        // The row that started the read owns it. Thus the read stops when that row goes away, the same as before other rows could wait for it
+        let thumbnail = await withTaskCancellationHandler {
+            await readTask.value
+        } onCancel: {
+            readTask.cancel()
+        }
+        
+        readsInProgress[reference] = nil
+        
+        guard let thumbnail else {
             // Cancellation releases its claim; a genuine "no art here" keeps it, so a file is never opened twice
-            if Task.isCancelled {
+            if readTask.isCancelled {
                 alreadyAttempted.remove(reference)
             }
             return nil
