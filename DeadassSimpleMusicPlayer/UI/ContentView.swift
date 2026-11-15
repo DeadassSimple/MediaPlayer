@@ -26,8 +26,25 @@ private let skipTimeIncrement: PlayerAction.SkipIncrement = .seconds(10)
 
 struct ContentView: View {
     
+    // MARK: External state
+    
     @Environment(\.scenePhase)
     private var scenePhase
+    
+    /// Part of the layout decision in `useFullscreenUi`. At this time, the layout does not change with the width.
+    @Environment(\.horizontalSizeClass)
+    private var horizontalSizeClass
+    
+    /// Selects the layout: a compact height shows the media full screen, with no title or artist
+    @Environment(\.verticalSizeClass)
+    private var verticalSizeClass
+    
+    
+    // MARK: Private state
+    
+    /// The picture-in-picture state of the player
+    @State
+    private var pipStatus = Player.PipStatus.undefined
     
     @State
     private var showFileBrowser = false
@@ -43,9 +60,12 @@ struct ContentView: View {
     @State
     private var newestFolderImport: Task<Void, Never>? = nil
     
+    
+    // MARK: `View`
+    
     var body: some View {
         NavigationStack {
-            CustomMediaPlayer(session: session)
+            main
             
                 .playerControls(configuration: controlsConfiguration) { [session] action in
                     await session.perform(action)
@@ -107,6 +127,56 @@ struct ContentView: View {
             if .active != newPhase {
                 session.nowPlaying.saveSnapshotNow()
             }
+        }
+    }
+}
+
+
+
+private extension ContentView {
+    var main: some View {
+        VStack {
+            playerView
+            
+            TitleBar(mode: titleBarMode)
+        }
+        .background(Color(.secondarySystemBackground))
+        .background(ignoresSafeAreaEdges: .all)
+    }
+}
+
+
+
+// MARK: - Player view
+
+private extension ContentView {
+    
+    /// The engine of `session`
+    @inline(__always)
+    var engine: PlaybackEngine {
+        session.engine
+    }
+    
+    
+    /// The media itself: the video, or the cover art for audio
+    var playerView: some View {
+        Player(player: engine.player, artwork: engine.artwork, pipStatus: $pipStatus)
+            .aspectRatio(16/9, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .layoutPriority(2)
+//            .ignoresSafeArea(.container, edges: useFullscreenUi ? .top : [])
+    }
+    
+    
+    var titleBarMode: TitleBar.Mode {
+        if let loadingMessage = session.loadingMessage {
+            return .appIsLoading(message: LocalizedStringKey(loadingMessage))
+        }
+        else if let currentItem = engine.currentItem {
+            return .loaded(currentItem: currentItem)
+        }
+        else {
+            return .noMedia
         }
     }
 }
