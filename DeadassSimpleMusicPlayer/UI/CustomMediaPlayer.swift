@@ -54,7 +54,7 @@ struct CustomMediaPlayer: View {
             playerView
             
             if !useFullscreenUi {
-                metadataView
+                TitleBar(mode: titleBarMode)
             }
         }
         .background(Color(.secondarySystemBackground))
@@ -94,30 +94,16 @@ private extension CustomMediaPlayer {
 
 private extension CustomMediaPlayer {
     
-    /// The title and the artist of the loaded item
-    var metadataView: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            titleView
-                .font(.largeTitle.weight(.medium))
-                .foregroundStyle(.primary) // not strictly necessary, but I wanted to explicitly call out the relationship to the next Text down
-                .multilineTextAlignment(.leading)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-//                .border(.red)
-            
-            Text(creatorText)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.leading)
-                .fixedSize()
-//                .border(.red)
-            
-            Spacer(minLength: 0)
-                .layoutPriority(1)
+    var titleBarMode: TitleBar.Mode {
+        if let loadingMessage = session.loadingMessage {
+            return .appIsLoading(message: LocalizedStringKey(loadingMessage))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal)
-//        .border(.blue)
+        else if let currentItem = engine.currentItem {
+            return .loaded(currentItem: currentItem)
+        }
+        else {
+            return .noMedia
+        }
     }
     
     
@@ -131,50 +117,6 @@ private extension CustomMediaPlayer {
     }
 }
 
-
-
-// MARK: - Metadata
-
-private extension CustomMediaPlayer {
-    
-    /// The title of the loaded item. While something loads, this view shows `loadingMessage` and not the title.
-    @ViewBuilder
-    var titleView: some View {
-        if let loadingMessage = session.loadingMessage {
-            HStack {
-                ProgressView()
-                Text(LocalizedStringKey(loadingMessage.key))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        else {
-            Text({
-                switch engine.metadata(.title) {
-                case .none: nil == engine.currentItem ? "Pick something to play :3" : ""
-                case .notStarted: "…"
-                case .loading: "⋯"
-                case .success(let value): "\(value)"
-                case .failure(_): // If we ever add more possible error cases than NotFound, this needs updating
-                    (engine.currentItem?.autoAccessSecurityScopedResourceUrl.deletingPathExtension().lastPathComponent.nonEmptyOrNil).map { "\($0)" } ?? "Untitled"
-                }
-            }())
-        }
-    }
-    
-    
-    /// The artist of the loaded item, or an empty string while something loads
-    var creatorText: LocalizedStringKey {
-        guard nil == session.loadingMessage else { return "" }
-        
-        return switch engine.metadata(.creator) {
-        case .none: ""
-        case .notStarted: "⋯"
-        case .loading: "…"
-        case .success(let value): "\(value)"
-        case .failure(_): ""
-        }
-    }
-}
 
 
 
