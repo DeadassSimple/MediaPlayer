@@ -60,6 +60,9 @@ struct ContentView: View {
     @State
     private var newestFolderImport: Task<Void, Never>? = nil
     
+    @State
+    private var expansion: TitleBar.Expansion = .collapsed
+    
     
     // MARK: `View`
     
@@ -138,7 +141,7 @@ private extension ContentView {
         VStack {
             playerView
             
-            TitleBar(mode: titleBarMode)
+            TitleBar(mode: titleBarMode, expansion: $expansion)
         }
         .background(Color(.secondarySystemBackground))
         .background(ignoresSafeAreaEdges: .all)
