@@ -201,6 +201,7 @@ public extension AsyncMetadata.RetrievalApproach where Value == NativeImage {
 // MARK: Default keys
 
 public extension AsyncMetadataKey where Value == String {
+    
     /// The media's title (or name)
     static let title = Self(id: "title", identifiers: [
         .quickTimeUserDataTrackName,
@@ -211,6 +212,7 @@ public extension AsyncMetadataKey where Value == String {
         .quickTimeMetadataTitle,
         .icyMetadataStreamTitle,
     ])
+    
     
     /// The media's creator (or author, or artist, or band, or composer, or...)
     static let creator = Self(id: "creator", identifiers: [
@@ -242,6 +244,7 @@ public extension AsyncMetadataKey where Value == String {
         .id3MetadataPublisher,
     ])
     
+    
     /// The album (or collection, or compilation) the media belongs to.
     static let album = Self(id: "album", identifiers: [
         .commonIdentifierAlbumName,
@@ -249,6 +252,18 @@ public extension AsyncMetadataKey where Value == String {
         .id3MetadataAlbumTitle,
         .quickTimeMetadataAlbum,
         .quickTimeUserDataAlbum,
+    ])
+    
+    
+    /// The season of the show that the media belongs to
+    static let season = Self(id: "season", identifiers: [
+        // todo
+    ])
+    
+    
+    /// The episode of the season of the show that the media belongs to
+    static let episode = Self(id: "episode", identifiers: [
+        // todo
     ])
 }
 

@@ -50,7 +50,7 @@ struct TitleBar: View {
     enum Mode {
         case appIsLoading(message: LocalizedStringKey)
         case noMedia
-        case loaded(currentItem: MediaItem)
+        case loaded(metadata: Metadata)
     }
     
     
@@ -86,41 +86,30 @@ private extension TitleBar {
         case .noMedia:
             Text("Pick something to play :3")
             
-        case .loaded(currentItem: let currentItem):
-            switch currentItem.metadata?.get(.title) {
-            case .notStarted,
-                    .loading:
-                Text("…")
-                
-            case .success(let value):
-                Text(verbatim: value)
+        case .loaded(metadata: let metadata):
+            if let title = metadata.title {
+                Text(verbatim: title)
                     .fontWeight(.medium)
-                
-            case .failure(_),
-                    .none:
-                // If we ever add more possible error cases than NotFound, this needs updating
-                if let filename = currentItem.autoAccessSecurityScopedResourceUrl.deletingPathExtension().lastPathComponent.nonEmptyOrNil {
-                    Text(verbatim: filename)
-                }
-                else {
-                    Text("Untitled")
-                }
+            }
+            else {
+                Text(verbatim: metadata.filename)
             }
         }
     }
     
     
     /// The artist of the loaded item, or an empty string while something loads
+    @ViewBuilder
     var furtherMetadata: some View {
         switch mode {
         case .appIsLoading(message: _),
                 .noMedia:
-            Text("")
+            EmptyView()
             
-        case .loaded(currentItem: let currentItem):
+        case .loaded(metadata: let metadata):
             HStack {
-                ForEach(currentItem.presentedMetadata) { labelledMetadata in
-                    smallMetadata(label: labelledMetadata.label, value: labelledMetadata.metadata)
+                ForEach(metadata.allSecondary) { labelledMetadatum in
+                    smallMetadatum(label: labelledMetadatum.label, value: labelledMetadatum.value)
                 }
             }
         }
@@ -128,26 +117,105 @@ private extension TitleBar {
     
     
     /// The artist of the loaded item, or an empty string while something loads
-    func smallMetadata(label: LocalizedStringKey, value: AsyncMetadataKey<String>) -> Text {
+    func smallMetadatum(label: LocalizedStringKey, value: String) -> Text {
         switch mode {
         case .appIsLoading(message: _),
                 .noMedia:
             Text("")
             
-        case .loaded(currentItem: let currentItem):
-            switch currentItem.metadata?.get(value) {
-            case .notStarted,
-                    .loading:
-                Text("⋯")
-                
-            case .success(let value):
-                Text("\(value) \(Text(verbatim: value).bold())")
-                    .fontWeight(.medium)
-                
-            case .failure(_),
-                    .none:
-                Text("")
-            }
+        case .loaded(metadata: _):
+            Text("\(Text(label)) \(Text(verbatim: value).bold())")
+                .fontWeight(.medium)
         }
+    }
+}
+
+
+
+internal extension TitleBar {
+    /// All the metadata that a title bar can display
+    struct Metadata {
+        let filename: String
+        let title: String?
+        
+        let season: String?
+        let episode: String?
+        let track: String?
+        let album: String?
+        let creator: String?
+        
+        var allSecondary: [LabelledMetadatum] {
+            [
+                // Show:
+                (label: "season",                           value: season),
+                (label: "ep",                               value: episode),
+                
+                // Movie:
+                // <none yet>
+                
+                // Music:
+                (label: "track",                            value: track),
+                (label: nil == creator ? "album:" : "from", value: album),
+                
+                // General:
+                (label: "by",                               value: creator),
+            ]
+                .compactMap { (label: LocalizedStringKey, value: String?) in
+                    if let value {
+                        return LabelledMetadatum(label: label, value: value)
+                    }
+                    else {
+                        return nil
+                    }
+                }
+        }
+    }
+    
+    
+    
+    /// One metadatum and its label to show in the UI
+    struct LabelledMetadatum: Identifiable {
+        
+        var id: String { "\(label):\(value)" }
+        
+        /// The label to display in th UI, labelling ``value``
+        let label: LocalizedStringKey
+        
+        /// The metadatum value to display in the UI, labelled by ``label``
+        let value: String
+    }
+}
+
+
+
+internal extension TitleBar.Metadata {
+    init(in item: MediaItem) async {
+        let filename = item
+            .autoAccessSecurityScopedResourceUrl
+            .deletingPathExtension()
+            .lastPathComponent
+            .nonEmptyOrNil
+        ?? NSLocalizedString("Untitled", comment: "") // Would prefer to not use `NS` but I can't find a more modern API so......
+        
+        async let title =   try? item.metadata?.get(.title)
+        async let season =  try? item.metadata?.get(.season)
+        async let episode = try? item.metadata?.get(.episode)
+        async let track =   try? item.metadata?.get(.trackNumber)
+        async let album =   try? item.metadata?.get(.album)
+        async let creator = try? item.metadata?.get(.creator)
+        
+        self.init(
+            filename: filename,
+            title: await title,
+            
+            
+            season: await season,
+            episode: await episode,
+            
+            track: await track?.description,
+            album: await album,
+            
+            creator: await creator,
+        )
     }
 }

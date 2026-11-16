@@ -176,7 +176,7 @@ private extension ContentView {
             return .appIsLoading(message: LocalizedStringKey(loadingMessage))
         }
         else if let currentItem = engine.currentItem {
-            return .loaded(currentItem: currentItem)
+            return .loaded(metadata: await TitleBar.Metadata(in: currentItem)) // WIP(Error): 'async' call in a function that does not support concurrency
         }
         else {
             return .noMedia
