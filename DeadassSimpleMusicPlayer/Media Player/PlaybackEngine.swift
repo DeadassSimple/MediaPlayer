@@ -22,7 +22,7 @@ import SimpleLogging
 
 /// Plays 1 media item, and tells the system that this item is the media that plays.
 ///
-/// Use this type to show or control playback directly. For example, a transport bar can read `isPlaying` and call `play()`. To show the video or the cover art, use `CustomMediaPlayer`, which shows this engine.
+/// Use this type to show or control playback directly. For example, a transport bar can read `isPlaying` and call `play()`.
 ///
 /// The engine does the work that the system wants from a media app:
 /// - It obeys the remote commands (Control Center, the Lock Screen, headphone buttons).

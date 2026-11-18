@@ -15,7 +15,7 @@ import SimpleLogging
 
 struct TitleBar: View {
     
-    let mode: Mode
+    let display: Display
     
     let expansion: Binding<Expansion>
     
@@ -47,9 +47,16 @@ struct TitleBar: View {
     
     
     
-    enum Mode {
+    /// What kind of content the title bar is displaying
+    enum Display {
+        
+        /// The title bar only displays a loading message
         case appIsLoading(message: LocalizedStringKey)
+        
+        /// The title bar indicates that no media is currently loaded
         case noMedia
+        
+        /// The title bar is showing information about the currently-loaded media file
         case loaded(metadata: Metadata)
     }
     
@@ -75,7 +82,7 @@ private extension TitleBar {
     /// The title of the loaded item. While something loads, this view shows `loadingMessage` and not the title.
     @ViewBuilder
     var title: some View {
-        switch mode {
+        switch display {
         case .appIsLoading(message: let loadingMessage):
             HStack {
                 ProgressView()
@@ -98,10 +105,10 @@ private extension TitleBar {
     }
     
     
-    /// The artist of the loaded item, or an empty string while something loads
+    /// All displayed metadata aside from the title of the current item
     @ViewBuilder
     var furtherMetadata: some View {
-        switch mode {
+        switch display {
         case .appIsLoading(message: _),
                 .noMedia:
             EmptyView()
@@ -116,9 +123,9 @@ private extension TitleBar {
     }
     
     
-    /// The artist of the loaded item, or an empty string while something loads
+    /// One piece of metadata rendered smaller than the title. For example: the creator, or track/episode number
     func smallMetadatum(label: LocalizedStringKey, value: String) -> Text {
-        switch mode {
+        switch display {
         case .appIsLoading(message: _),
                 .noMedia:
             Text("")

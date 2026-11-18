@@ -23,7 +23,7 @@ private let skipBackThreshold: TimeInterval = 1.5
 
 /// Connects the playback engine with the queue, the history and the saved playlists. To play media, a view must have only this object.
 ///
-/// Make 1 session, and keep it for the life of the app. Give it to `CustomMediaPlayer` to show its media. To use 1 part directly, use these properties:
+/// Make 1 session, and keep it for the life of the app. To use 1 part directly, use these properties:
 /// - `engine` (`PlaybackEngine`): plays 1 item. It owns the `AVPlayer`, does not know about queues, and saves nothing.
 /// - `nowPlaying` (`NowPlayingStore`): the queue and the `RepeatMode`. It saves them, and tells the engine which item to load.
 /// - `history` (`HistoryStore`): what played. It saves the history.

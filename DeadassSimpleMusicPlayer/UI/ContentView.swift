@@ -63,6 +63,9 @@ struct ContentView: View {
     @State
     private var expansion: TitleBar.Expansion = .collapsed
     
+    @State
+    private var resolvedTitleBarDisplay: TitleBar.Display = .appIsLoading(message: "")
+    
     
     // MARK: `View`
     
@@ -121,7 +124,9 @@ struct ContentView: View {
         
         
         .task {
+            resolvedTitleBarDisplay = await titleBarDisplay
             await session.loadIfNeeded()
+            resolvedTitleBarDisplay = await titleBarDisplay
         }
         
         
@@ -141,7 +146,7 @@ private extension ContentView {
         VStack {
             playerView
             
-            TitleBar(mode: titleBarMode, expansion: $expansion)
+            TitleBar(display: resolvedTitleBarDisplay, expansion: $expansion)
         }
         .background(Color(.secondarySystemBackground))
         .background(ignoresSafeAreaEdges: .all)
@@ -171,15 +176,17 @@ private extension ContentView {
     }
     
     
-    var titleBarMode: TitleBar.Mode {
-        if let loadingMessage = session.loadingMessage {
-            return .appIsLoading(message: LocalizedStringKey(loadingMessage))
-        }
-        else if let currentItem = engine.currentItem {
-            return .loaded(metadata: await TitleBar.Metadata(in: currentItem)) // WIP(Error): 'async' call in a function that does not support concurrency
-        }
-        else {
-            return .noMedia
+    var titleBarDisplay: TitleBar.Display {
+        get async {
+            if let loadingMessage = session.loadingMessage {
+                return .appIsLoading(message: LocalizedStringKey(loadingMessage))
+            }
+            else if let currentItem = engine.currentItem {
+                return .loaded(metadata: await TitleBar.Metadata(in: currentItem))
+            }
+            else {
+                return .noMedia
+            }
         }
     }
 }
