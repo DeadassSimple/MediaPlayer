@@ -8,6 +8,7 @@
 import Combine
 import Foundation
 import AVKit
+import os
 
 import ConcurrencyTools
 import CrossKitTypes
@@ -34,12 +35,8 @@ public typealias Metadata = Sendable & Equatable
 @Observable
 #endif
 public final class AsyncMetadata: @unchecked Sendable {
-    // `@unchecked` covers the cache-dictionary insert in `lazySearch(for:)`,
-    // which is racy in the same benign way as the previous implementation:
-    // two concurrent first-lookups for the same key may each construct a
-    // binding, with the loser orphaned but producing no incorrect result.
-    // Fixing this would require a mutex around the insert; see the closing
-    // comment in `lazySearch(for:)`.
+    // `__cache` is the only mutable state. Its lock guards every access.
+    // `@unchecked` stays because this change does not remove it.
     
     /// Aids in determining if an `AsyncMetadata` is unique amongst others.
     private let id = UUID()
@@ -51,7 +48,7 @@ public final class AsyncMetadata: @unchecked Sendable {
     /// Per-key lazy searches. Each entry encapsulates its own loading state
     /// (`.notStarted` / `.loading` / `.success` / `.failure`) and caches the
     /// outcome forever after first resolution.
-    private var __cache: [AsyncMetadataKeyId: CachedSearch] = [:]
+    private let __cache = OSAllocatedUnfairLock(initialState: [AsyncMetadataKeyId: CachedSearch]())
     
     /// Republishes a `Void` whenever any cached search transitions into a
     /// terminal state. Backs the public ``onMetadataDidUpdate()`` contract.
@@ -369,19 +366,19 @@ private extension AsyncMetadata {
     /// moment of transition (rather than repeatedly on every subsequent
     /// `get`).
     ///
-    /// The dictionary insert at the end of this method is not protected by a
-    /// mutex; under a true race between two callers for the same key, both
-    /// will construct a binding and one will overwrite the other. The
-    /// orphaned binding is benign — it produces no incorrect result, just a
-    /// wasted background `Task`. If that ever becomes unacceptable, wrap the
-    /// read-or-install in a `Mutex.run { ... }` block using the same `Mutex`
-    /// type the `ThrowingAsyncBinding` implementation already relies on.
+    /// Many tasks can call this method at the same time. All tasks that ask
+    /// for the same `key` get the same search.
     func lazySearch<Value: Sendable>(for key: Key<Value>) -> CachedSearch {
-        if let existing = __cache[key.id] {
-            return existing
-        }
-        
-        let search = CachedSearch { [weak self] in
+        // The read and the insert happen in one step under the lock, so two
+        // callers for the same key cannot both install a search. Making a
+        // `CachedSearch` only stores its closure and starts no work, so it
+        // is safe to make one while the lock is held.
+        let (search, didInstall) = __cache.withLock { cache -> (CachedSearch, Bool) in
+            if let existing = cache[key.id] {
+                return (existing, false)
+            }
+            
+            let search = CachedSearch { [weak self] in
                 guard let self else {
                     // The owning AsyncMetadata has been deallocated;
                     // there's nothing meaningful to return. The binding
@@ -394,6 +391,14 @@ private extension AsyncMetadata {
                     matching: key
                 )
             }
+            
+            cache[key.id] = search
+            return (search, true)
+        }
+        
+        // Only the caller that installed the search observes it, so each key
+        // republishes exactly one ping.
+        guard didInstall else { return search }
         
         
         // Observe the search's completion (terminal state) and republish a
@@ -420,7 +425,6 @@ private extension AsyncMetadata {
             self?.metadataUpdatePublisher.send(())
         }
         
-        __cache[key.id] = search
         return search
     }
     
